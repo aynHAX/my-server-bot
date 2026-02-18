@@ -8,6 +8,7 @@ from telebot.types import InputMediaPhoto
 from flask import Flask
 from playwright.sync_api import sync_playwright
 from telebot.apihelper import ApiTelegramException
+from playwright_stealth import stealth_sync  # مكتبة التخفي الجديدة
 
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 if not BOT_TOKEN:
@@ -17,26 +18,25 @@ if not BOT_TOKEN:
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
-# قفل لمنع استنزاف الرام
 browser_lock = threading.Lock()
 
 @app.route('/')
 def health_check():
-    return "Bot is running perfectly!"
+    return "Bot is running perfectly with Stealth Mode!"
 
 def run_flask():
     app.run(host="0.0.0.0", port=8000, debug=False, use_reloader=False)
 
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
-    bot.reply_to(message, "مرحباً! أرسل لي رابط Google Skills وسأقوم بعمل بث مباشر له بأمان 🔴")
+    bot.reply_to(message, "مرحباً! أرسل لي رابط Google Skills وسأقوم بفتحه متجاوزاً حماية جوجل 🔴")
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     text = message.text.strip()
     
-    if not text.startswith("https://www.skills.google/google_sso"):
-        bot.reply_to(message, "الرجاء إرسال رابط صحيح يخص منصة Google Skills ويبدأ بـ:\nhttps://www.skills.google/google_sso 🔗")
+    if "skills.google" not in text:
+        bot.reply_to(message, "الرجاء إرسال رابط صحيح يخص منصة Google Skills 🔗")
         return
         
     if browser_lock.locked():
@@ -44,50 +44,52 @@ def handle_message(message):
         return
 
     with browser_lock:
-        wait_msg = bot.reply_to(message, "جاري فتح الرابط المخصص في الوضع المخفي العميق... 🕵️‍♂️")
+        wait_msg = bot.reply_to(message, "جاري الدخول بوضع التخفي العميق (Stealth Mode) لتجاوز حماية جوجل... 🕵️‍♂️")
         screenshot_path = f"screenshot_{message.chat.id}.jpg" 
         
         try:
             with sync_playwright() as p:
-                # [تعديل هام] إضافة إعدادات التخفي لتجاوز حماية جوجل
+                # إعدادات إطلاق المتصفح
                 browser = p.chromium.launch(
                     headless=True,
                     args=[
                         "--disable-dev-shm-usage", 
                         "--no-sandbox", 
-                        "--disable-gpu", 
-                        "--disable-setuid-sandbox",
-                        "--incognito", # إجبار المتصفح على الوضع المخفي من الجذور
-                        "--disable-blink-features=AutomationControlled" # إخفاء حقيقة أنه بوت آلي
+                        "--disable-gpu",
+                        "--disable-blink-features=AutomationControlled",
+                        "--start-maximized"
                     ]
                 )
                 
-                # إضافة User-Agent حقيقي لكي تظن جوجل أنه حاسوب ويندوز طبيعي
-                real_user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+                # إضافة User-Agent واقعي جداً
+                real_user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
                 
                 context = browser.new_context(
                     viewport={'width': 1280, 'height': 720},
                     user_agent=real_user_agent
                 )
+                
+                # حقن كود خفي لحذف أي أثر للبوت
+                context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+                
                 page = context.new_page()
                 
-                # مسح أي بيانات سابقة لضمان نظافة الجلسة تماماً
-                context.clear_cookies()
+                # تفعيل وضع التخفي (Stealth) على الصفحة قبل فتح الرابط
+                stealth_sync(page)
                 
+                # التوجه للرابط
                 page.goto(text, timeout=60000)
                 
-                # التقاط الصورة الأولى
                 page.screenshot(path=screenshot_path, type="jpeg", quality=40)
                 
                 with open(screenshot_path, 'rb') as photo:
-                    stream_msg = bot.send_photo(message.chat.id, photo, caption="🔴 بث مباشر لصفحة الدخول (يتم التحديث)...")
+                    stream_msg = bot.send_photo(message.chat.id, photo, caption="🔴 بث مباشر (Stealth Mode)...")
                     
                 try:
                     bot.delete_message(message.chat.id, wait_msg.message_id)
                 except ApiTelegramException:
                     pass
                 
-                # البث المباشر
                 for _ in range(15): 
                     time.sleep(2.5) 
                     
@@ -95,20 +97,17 @@ def handle_message(message):
                     
                     try:
                         with open(screenshot_path, 'rb') as photo:
-                            media = InputMediaPhoto(photo, caption="🔴 بث مباشر لصفحة الدخول (يتم التحديث)...")
+                            media = InputMediaPhoto(photo, caption="🔴 بث مباشر (Stealth Mode)...")
                             bot.edit_message_media(chat_id=message.chat.id, message_id=stream_msg.message_id, media=media)
                     
                     except ApiTelegramException as e:
-                        error_text = str(e)
-                        if "message is not modified" in error_text:
+                        if "message is not modified" in str(e):
                             continue
-                        elif "message to edit not found" in error_text:
+                        elif "message to edit not found" in str(e):
                             break
-                        else:
-                            print(f"حدث خطأ أثناء تحديث الصورة: {error_text}")
                             
                 try:
-                    bot.edit_message_caption(chat_id=message.chat.id, message_id=stream_msg.message_id, caption="✅ انتهى البث المباشر وتم إغلاق المتصفح لترشيد الاستهلاك.")
+                    bot.edit_message_caption(chat_id=message.chat.id, message_id=stream_msg.message_id, caption="✅ انتهى البث المباشر.")
                 except ApiTelegramException:
                     pass
                     
@@ -126,7 +125,6 @@ def handle_message(message):
                 os.remove(screenshot_path)
 
 def signal_handler(signum, frame):
-    print("تم استلام أمر إيقاف من الاستضافة. جاري إغلاق البوت بأمان...")
     bot.stop_polling()
     sys.exit(0)
 
@@ -137,5 +135,4 @@ if __name__ == "__main__":
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
     
-    print("جاري تشغيل البوت الاحترافي...")
     bot.infinity_polling(skip_pending=True)
