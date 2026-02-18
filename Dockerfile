@@ -1,20 +1,15 @@
-# استخدام نسخة بايثون النظيفة
-FROM python:3.10
+# استخدام نسخة بايثون خفيفة
+FROM python:3.10-slim
 
-# تثبيت الشاشة الوهمية
-RUN apt-get update && apt-get install -y xvfb
-
+# تعيين مجلد العمل داخل الحاوية
 WORKDIR /app
 
-# تنصيب المكتبات
+# نسخ ملف المتطلبات وتثبيت المكتبات
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# تنصيب متصفح كروم مع المتطلبات الأساسية
-RUN playwright install --with-deps chromium
-
-# نسخ باقي الملفات
+# نسخ باقي ملفات المشروع
 COPY . .
 
-# تشغيل البوت (حرف u لإظهار السجلات فوراً)
-CMD ["python", "-u", "main.py"]
+# الأمر الخاص بتشغيل البوت
+CMD ["python", "main.py"]
