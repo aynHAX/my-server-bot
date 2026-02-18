@@ -44,18 +44,35 @@ def handle_message(message):
         return
 
     with browser_lock:
-        wait_msg = bot.reply_to(message, "جاري فتح الرابط المخصص بأمان تام... 🕵️‍♂️")
+        wait_msg = bot.reply_to(message, "جاري فتح الرابط المخصص في الوضع المخفي العميق... 🕵️‍♂️")
         screenshot_path = f"screenshot_{message.chat.id}.jpg" 
         
         try:
             with sync_playwright() as p:
+                # [تعديل هام] إضافة إعدادات التخفي لتجاوز حماية جوجل
                 browser = p.chromium.launch(
                     headless=True,
-                    args=["--disable-dev-shm-usage", "--no-sandbox", "--disable-gpu", "--disable-setuid-sandbox"]
+                    args=[
+                        "--disable-dev-shm-usage", 
+                        "--no-sandbox", 
+                        "--disable-gpu", 
+                        "--disable-setuid-sandbox",
+                        "--incognito", # إجبار المتصفح على الوضع المخفي من الجذور
+                        "--disable-blink-features=AutomationControlled" # إخفاء حقيقة أنه بوت آلي
+                    ]
                 )
                 
-                context = browser.new_context(viewport={'width': 1280, 'height': 720})
+                # إضافة User-Agent حقيقي لكي تظن جوجل أنه حاسوب ويندوز طبيعي
+                real_user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
+                
+                context = browser.new_context(
+                    viewport={'width': 1280, 'height': 720},
+                    user_agent=real_user_agent
+                )
                 page = context.new_page()
+                
+                # مسح أي بيانات سابقة لضمان نظافة الجلسة تماماً
+                context.clear_cookies()
                 
                 page.goto(text, timeout=60000)
                 
@@ -65,7 +82,6 @@ def handle_message(message):
                 with open(screenshot_path, 'rb') as photo:
                     stream_msg = bot.send_photo(message.chat.id, photo, caption="🔴 بث مباشر لصفحة الدخول (يتم التحديث)...")
                     
-                # محاولة حذف رسالة الانتظار بأمان
                 try:
                     bot.delete_message(message.chat.id, wait_msg.message_id)
                 except ApiTelegramException:
@@ -82,21 +98,15 @@ def handle_message(message):
                             media = InputMediaPhoto(photo, caption="🔴 بث مباشر لصفحة الدخول (يتم التحديث)...")
                             bot.edit_message_media(chat_id=message.chat.id, message_id=stream_msg.message_id, media=media)
                     
-                    # [تحديث الأمان هنا] التقاط أخطاء التحديث المحددة وتجاهلها
                     except ApiTelegramException as e:
                         error_text = str(e)
                         if "message is not modified" in error_text:
-                            # تجاهل الخطأ بصمت، الصورة لم تتغير عن السابقة
                             continue
                         elif "message to edit not found" in error_text:
-                            # المستخدم قام بحذف رسالة البث، يجب إيقاف الحلقة (Loop)
-                            print("تم حذف رسالة البث من قبل المستخدم، جاري إيقاف البث.")
                             break
                         else:
-                            # طباعة أي خطأ آخر في السجلات للرجوع إليه
                             print(f"حدث خطأ أثناء تحديث الصورة: {error_text}")
                             
-                # محاولة تحديث النص الختامي بأمان
                 try:
                     bot.edit_message_caption(chat_id=message.chat.id, message_id=stream_msg.message_id, caption="✅ انتهى البث المباشر وتم إغلاق المتصفح لترشيد الاستهلاك.")
                 except ApiTelegramException:
