@@ -1,15 +1,17 @@
-# استخدام نسخة بايثون خفيفة
 FROM python:3.10-slim
 
-# تعيين مجلد العمل داخل الحاوية
 WORKDIR /app
 
-# نسخ ملف المتطلبات وتثبيت المكتبات
+# نسخ ملف المتطلبات وتثبيت مكتبات بايثون
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+# تثبيت متصفح Chromium والملفات الأساسية لتشغيله
+RUN playwright install chromium
+RUN playwright install-deps chromium
 
 # نسخ باقي ملفات المشروع
 COPY . .
 
-# الأمر الخاص بتشغيل البوت
+# تشغيل السكربت
 CMD ["python", "main.py"]
