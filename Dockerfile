@@ -1,17 +1,15 @@
-FROM python:3.10-slim
+# استخدام صورة Playwright الرسمية المجهزة مسبقاً بالمتصفحات والاعتمادات
+FROM mcr.microsoft.com/playwright/python:v1.42.0-jammy
 
+# تعيين مجلد العمل
 WORKDIR /app
 
-# نسخ ملف المتطلبات وتثبيت مكتبات بايثون
+# نسخ ملف المتطلبات وتثبيت مكتبات بايثون (Flask و Telebot)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-# تثبيت متصفح Chromium والملفات الأساسية لتشغيله
-RUN playwright install chromium
-RUN playwright install-deps chromium
 
 # نسخ باقي ملفات المشروع
 COPY . .
 
-# تشغيل السكربت
+# تشغيل البوت
 CMD ["python", "main.py"]
