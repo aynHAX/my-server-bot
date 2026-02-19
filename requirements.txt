@@ -1,3 +1,4 @@
 pyTelegramBotAPI
 selenium
-selenium-stealth
+undetected-chromedriver
+PyVirtualDisplay
