@@ -46,15 +46,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         async with async_playwright() as p:
-            # ⚠️ تم التعديل ليتوافق مع خوادم Linux (Koyeb)
             browser = await p.chromium.launch(
-                headless=True, # يجب أن يكون True على الخادم
+                headless=True,
                 args=[
                     '--disable-blink-features=AutomationControlled',
                     '--start-maximized',
                     '--disable-infobars',
-                    '--no-sandbox', # ضروري لبيئة الخوادم
-                    '--disable-setuid-sandbox' # ضروري لبيئة الخوادم
+                    '--no-sandbox', 
+                    '--disable-setuid-sandbox' 
                 ]
             )
             
@@ -73,7 +72,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await p_stealth.stealth(page)
                 else:
                     await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-            except Exception as e:
+            except Exception:
                 pass
 
             await page.mouse.move(random.randint(100, 400), random.randint(100, 400))
@@ -196,7 +195,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=chat_id, text="⏹️ تم إغلاق الجلسة بنجاح.")
             
     except Exception as e:
-        await update.message.reply_text(f"❌ خطأ تقني: {str(e)}")
+        # هنا تم قص رسالة الخطأ لتجنب مشكلة (Message is too long) في تيليغرام
+        error_message = str(e)[:500] 
+        await update.message.reply_text(f"❌ حدث خطأ، التفاصيل (مختصرة):\n{error_message}")
     finally:
         if chat_id in active_sessions: 
             del active_sessions[chat_id]
