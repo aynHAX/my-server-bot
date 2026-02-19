@@ -6,6 +6,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
+from webdriver_manager.core.os_manager import ChromeType # الاستيراد الجديد هنا
 
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 bot = telebot.TeleBot(BOT_TOKEN)
@@ -20,32 +21,28 @@ def send_welcome(message):
 def start_livestream(message):
     msg = bot.reply_to(message, "⏳ جاري تهيئة متصفح Brave والاتصال بالرابط...")
     
-    # إعدادات متصفح Brave
     options = Options()
     options.binary_location = "/usr/bin/brave-browser"
-    options.add_argument("--headless") # إجباري لخوادم Koyeb
+    options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
     
     try:
-        # تشغيل المتصفح باستخدام WebDriver
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+        # التعديل الأهم هنا: إخبار المكتبة بالبحث عن إصدار Brave وتنزيل الدرايفر المطابق له
+        driver_service = Service(ChromeDriverManager(chrome_type=ChromeType.BRAVE).install())
+        driver = webdriver.Chrome(service=driver_service, options=options)
+        
         driver.get(TARGET_URL)
         
         bot.edit_message_text("✅ تم الدخول للرابط! جاري بدء البث المباشر...", chat_id=message.chat.id, message_id=msg.message_id)
         
-        # حلقة البث المباشر
         while True:
-            # التقاط صورة للشاشة
             screenshot = driver.get_screenshot_as_png()
             photo = BytesIO(screenshot)
             photo.name = 'screen.png'
             
-            # إرسال الصورة للمستخدم
             bot.send_photo(message.chat.id, photo)
-            
-            # تأخير زمني لتجنب حظر تيليغرام
             time.sleep(2) 
             
     except Exception as e:
