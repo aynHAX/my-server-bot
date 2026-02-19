@@ -1,129 +1,51 @@
 import os
-import telebot
-import threading
-import time
-import signal
-import sys
-from telebot.types import InputMediaPhoto
-from flask import Flask
-from playwright.sync_api import sync_playwright
-from telebot.apihelper import ApiTelegramException
+import logging
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
-BOT_TOKEN = os.environ.get('BOT_TOKEN')
-if not BOT_TOKEN:
-    print("خطأ: يرجى التأكد من إضافة BOT_TOKEN في Koyeb")
-    sys.exit(1)
+# إعداد الـ Logging لمعرفة الأخطاء في كونيب
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 
-bot = telebot.TeleBot(BOT_TOKEN)
-app = Flask(__name__)
+# قراءة التوكن من متغيرات البيئة
+TOKEN = os.environ.get('TOKEN')
 
-# قفل لمنع استنزاف موارد الخادم
-browser_lock = threading.Lock()
+# دالة البدء
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text('مرحباً! أنا بوت يعمل على Koyeb. كيف يمكنني مساعدتك؟')
 
-@app.route('/')
-def health_check():
-    return "Bot is running perfectly with Firefox!"
+# دالة للرد على الرسائل (يقوم بتكرار الرسالة)
+async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(f"قلت: {update.message.text}")
 
-def run_flask():
-    app.run(host="0.0.0.0", port=8000, debug=False, use_reloader=False)
+# دالة للتعامل مع الأخطاء
+async def error(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logging.error(f'Update {update} caused error {context.error}')
 
-@bot.message_handler(commands=['start', 'help'])
-def send_welcome(message):
-    bot.reply_to(message, "مرحباً! أرسل لي رابط Google Skills وسأقوم بفتحه متجاوزاً حماية جوجل 🔴")
-
-@bot.message_handler(func=lambda message: True)
-def handle_message(message):
-    text = message.text.strip()
-    
-    # التأكد من أن الرابط يخص منصة مهارات جوجل
-    if "skills.google" not in text:
-        bot.reply_to(message, "الرجاء إرسال رابط صحيح يخص منصة Google Skills 🔗")
-        return
-        
-    if browser_lock.locked():
-        bot.reply_to(message, "⚠️ عذراً، البوت مشغول حالياً. يرجى الانتظار قليلاً ثم المحاولة.")
+def main():
+    # التأكد من وجود التوكن
+    if not TOKEN:
+        logging.error("لم يتم العثور على التوكن! تأكد من ضبط متغير البيئة TOKEN")
         return
 
-    with browser_lock:
-        wait_msg = bot.reply_to(message, "جاري الدخول باستخدام محرك Firefox لتجاوز فحص جوجل... 🦊")
-        screenshot_path = f"screenshot_{message.chat.id}.jpg" 
-        
-        try:
-            with sync_playwright() as p:
-                # إطلاق متصفح Firefox بدلاً من Chromium
-                browser = p.firefox.launch(
-                    headless=True
-                )
-                
-                # إعداد User-Agent واقعي لمتصفح فايرفوكس
-                firefox_user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0"
-                
-                context = browser.new_context(
-                    viewport={'width': 1280, 'height': 720},
-                    user_agent=firefox_user_agent
-                )
-                
-                page = context.new_page()
-                
-                # التوجه للرابط
-                page.goto(text, timeout=60000)
-                
-                # التقاط الصورة الأولى
-                page.screenshot(path=screenshot_path, type="jpeg", quality=40)
-                
-                with open(screenshot_path, 'rb') as photo:
-                    stream_msg = bot.send_photo(message.chat.id, photo, caption="🔴 بث مباشر (Firefox Mode)...")
-                    
-                try:
-                    bot.delete_message(message.chat.id, wait_msg.message_id)
-                except ApiTelegramException:
-                    pass
-                
-                # البث المباشر
-                for _ in range(15): 
-                    time.sleep(2.5) 
-                    
-                    page.screenshot(path=screenshot_path, type="jpeg", quality=40)
-                    
-                    try:
-                        with open(screenshot_path, 'rb') as photo:
-                            media = InputMediaPhoto(photo, caption="🔴 بث مباشر (Firefox Mode)...")
-                            bot.edit_message_media(chat_id=message.chat.id, message_id=stream_msg.message_id, media=media)
-                    
-                    except ApiTelegramException as e:
-                        if "message is not modified" in str(e):
-                            continue
-                        elif "message to edit not found" in str(e):
-                            break
-                            
-                try:
-                    bot.edit_message_caption(chat_id=message.chat.id, message_id=stream_msg.message_id, caption="✅ انتهى البث المباشر.")
-                except ApiTelegramException:
-                    pass
-                    
-                context.close()
-                browser.close()
-                
-        except Exception as e:
-            try:
-                bot.edit_message_text(f"❌ حدث خطأ داخلي:\n{str(e)}", message.chat.id, wait_msg.message_id)
-            except ApiTelegramException:
-                bot.send_message(message.chat.id, f"❌ حدث خطأ داخلي:\n{str(e)}")
-            
-        finally:
-            if os.path.exists(screenshot_path):
-                os.remove(screenshot_path)
+    # إنشاء التطبيق
+    application = Application.builder().token(TOKEN).build()
 
-# إغلاق آمن لتجنب تعليق Koyeb
-def signal_handler(signum, frame):
-    bot.stop_polling()
-    sys.exit(0)
-
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
-
-if __name__ == "__main__":
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
+    # إضافة معالجات الأوامر
+    application.add_handler(CommandHandler("start", start))
     
-    bot.infinity_polling(skip_pending=True)
+    # معالج الرسائل النصية (باستثناء الأوامر)
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
+
+    # معالج الأخطاء
+    application.add_error_handler(error)
+
+    # تشغيل البوت
+    logging.info("Bot is starting...")
+    # نستخدم run_polling لأن نوع الخدمة worker لا يتطلب بورت محدد
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+if __name__ == '__main__':
+    main()
