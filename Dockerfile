@@ -1,5 +1,5 @@
-# استخدام الصورة الرسمية من مايكروسوفت (جاهزة بكل مكتبات المتصفحات ونظام لينكس)
-FROM mcr.microsoft.com/playwright/python:v1.41.0-jammy
+# تم التحديث إلى الإصدار 1.58.0 بناءً على طلب Playwright
+FROM mcr.microsoft.com/playwright/python:v1.58.0-jammy
 
 WORKDIR /app
 
