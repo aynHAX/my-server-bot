@@ -9,8 +9,10 @@ RUN apt-get update && apt-get install -y xvfb
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 3. نسخ باقي ملفات المشروع
+# 3. نسخ ملف التشغيل وباقي الملفات
+COPY start.sh .
 COPY . .
 
-# 4. السحر هنا: تشغيل البوت داخل الشاشة الوهمية ليعمل المتصفح كأنه في حاسوب حقيقي
-CMD ["xvfb-run", "--auto-servernum", "--server-args=-screen 0 1920x1080x24", "python", "bot.py"]
+# 4. إعطاء صلاحية التشغيل للملف والبدء
+RUN chmod +x start.sh
+CMD ["./start.sh"]
