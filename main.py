@@ -11,10 +11,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-# الاستيرادات الجديدة لجلب الدرايفر وحل مشكلة المسار
-from webdriver_manager.chrome import ChromeDriverManager
-from webdriver_manager.core.os_manager import ChromeType
-
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -26,37 +22,34 @@ def send_welcome(message):
 
 @bot.message_handler(commands=['live'])
 def start_livestream(message):
-    msg = bot.reply_to(message, "⏳ [1/6] جاري بناء الشاشة الوهمية (Xvfb) داخل السيرفر...")
+    msg = bot.reply_to(message, "⏳ [1/5] جاري بناء الشاشة الوهمية (Xvfb) داخل السيرفر...")
     
     display = Display(visible=0, size=(1280, 720))
     display.start()
     
     try:
-        bot.edit_message_text("⏳ [2/6] جاري تحميل ملف التشغيل المتوافق (حل مشكلة المسار)...", chat_id=message.chat.id, message_id=msg.message_id)
-        # تحميل الدرايفر الصحيح وتسجيل مساره
-        driver_path = ChromeDriverManager(chrome_type=ChromeType.BRAVE).install()
-        
-        bot.edit_message_text("⏳ [3/6] جاري تجهيز المتصفح المضاد للاكتشاف...", chat_id=message.chat.id, message_id=msg.message_id)
+        bot.edit_message_text("⏳ [2/5] جاري تجهيز المتصفح المضاد للاكتشاف (بدون تحميل خارجي)...", chat_id=message.chat.id, message_id=msg.message_id)
         
         options = uc.ChromeOptions()
-        options.binary_location = "/usr/bin/brave-browser"
+        # توجيه المكتبة للمتصفح المثبت في النظام
+        options.binary_location = "/usr/bin/chromium"
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--incognito")
         options.add_argument("--disable-gpu")
         
-        # تمرير المسار الصحيح للمكتبة حتى لا تبحث عنه وتفشل
-        driver = uc.Chrome(options=options, use_subprocess=True, driver_executable_path=driver_path)
+        # إجبار المكتبة على استخدام الدرايفر المثبت مسبقاً لمنع أخطاء فك الضغط
+        driver = uc.Chrome(options=options, use_subprocess=True, driver_executable_path="/usr/bin/chromedriver")
         
-        bot.edit_message_text("⏳ [4/6] تم تشغيل المحرك! جاري خداع أنظمة جوجل...", chat_id=message.chat.id, message_id=msg.message_id)
+        bot.edit_message_text("⏳ [3/5] تم تشغيل المحرك! جاري خداع أنظمة جوجل...", chat_id=message.chat.id, message_id=msg.message_id)
         
         driver.get("https://accounts.google.com")
         time.sleep(3) 
         
-        bot.edit_message_text("⏳ [5/6] جاري الدخول للرابط الهدف...", chat_id=message.chat.id, message_id=msg.message_id)
+        bot.edit_message_text("⏳ [4/5] جاري الدخول للرابط الهدف...", chat_id=message.chat.id, message_id=msg.message_id)
         driver.get(TARGET_URL)
         
-        bot.edit_message_text("⏳ [6/6] جاري البحث عن زر 'I understand' والضغط عليه...", chat_id=message.chat.id, message_id=msg.message_id)
+        bot.edit_message_text("⏳ [5/5] جاري البحث عن زر 'I understand' والضغط عليه...", chat_id=message.chat.id, message_id=msg.message_id)
         try:
             understand_btn = WebDriverWait(driver, 10).until(
                 EC.element_to_be_clickable((By.XPATH, "//*[contains(translate(text(), 'I UNDERSTAND', 'i understand'), 'i understand') or contains(text(), 'أفهم') or contains(text(), 'أوافق')]"))
