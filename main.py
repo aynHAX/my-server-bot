@@ -3,9 +3,8 @@ import os
 import time
 import traceback
 from io import BytesIO
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium_stealth import stealth # استيراد مكتبة التمويه
+import undetected_chromedriver as uc
+from pyvirtualdisplay import Display
 
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 bot = telebot.TeleBot(BOT_TOKEN)
@@ -14,54 +13,43 @@ TARGET_URL = "https://www.skills.google/google_sso?fallback=https%3A%2F%2Faccoun
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "أهلاً بك! أرسل الأمر /live لبدء تشغيل متصفح Brave وبث الشاشة.")
+    bot.reply_to(message, "أهلاً بك! أرسل الأمر /live لبدء البث بالطريقة الخارقة 🚀")
 
 @bot.message_handler(commands=['live'])
 def start_livestream(message):
-    msg = bot.reply_to(message, "⏳ [1/4] جاري تجهيز إعدادات التمويه (Stealth) لتخطي حماية جوجل...")
+    msg = bot.reply_to(message, "⏳ [1/4] جاري بناء الشاشة الوهمية (Xvfb) داخل السيرفر...")
     
-    options = Options()
+    # 1. تشغيل الشاشة الوهمية
+    # هذا يجعل المتصفح يظن أنه يعمل على بي سي حقيقي تماماً!
+    display = Display(visible=0, size=(1280, 720))
+    display.start()
+    
+    bot.edit_message_text("⏳ [2/4] جاري تجهيز المتصفح المضاد للاكتشاف (Undetected-Chromedriver)...", chat_id=message.chat.id, message_id=msg.message_id)
+    
+    options = uc.ChromeOptions()
     options.binary_location = "/usr/bin/brave-browser"
-    options.add_argument("--headless=new")
+    
+    # تحذير: لا تضف أمر headless أبداً! المتصفح سيعمل كأنه مرئي
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--incognito") 
-    
-    # --- إعدادات تخطي الحماية (Anti-Bot) ---
-    # 1. إخفاء حقيقة أننا نستخدم نظام آلي
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option('useAutomationExtension', False)
-    
-    # 2. تزييف هوية المتصفح ليبدو كأنه يعمل من كمبيوتر ويندوز عادي وليس سيرفر لينكس
-    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
-    
-    # --- إعدادات توفير الذاكرة (RAM) الإجبارية ---
+    options.add_argument("--incognito")
     options.add_argument("--disable-gpu")
-    options.add_argument("--disable-software-rasterizer")
-    options.add_argument("--disable-extensions")
-    options.add_argument("--window-size=1280,720") 
-    options.add_argument("--js-flags=--expose-gc") 
+    
+    # تكتيك إضافي: فتح موقع جوجل الرئيسي أولاً لبناء سجل تصفح نظيف قبل الدخول لرابط تسجيل الدخول المعقد
     
     try:
-        bot.edit_message_text("⏳ [2/4] جاري تشغيل محرك Brave مع التمويه...", chat_id=message.chat.id, message_id=msg.message_id)
-        driver = webdriver.Chrome(options=options)
+        # تشغيل المحرك
+        driver = uc.Chrome(options=options, use_subprocess=True)
         
-        # --- تطبيق مكتبة Stealth ---
-        # هذا الجزء يغير بصمة الـ JavaScript للمتصفح ليخدع جوجل تماماً
-        stealth(driver,
-            languages=["en-US", "en"],
-            vendor="Google Inc.",
-            platform="Win32",
-            webgl_vendor="Intel Inc.",
-            renderer="Intel Iris OpenGL Engine",
-            fix_hairline=True,
-        )
+        bot.edit_message_text("⏳ [3/4] تم تشغيل المحرك! جاري خداع أنظمة جوجل...", chat_id=message.chat.id, message_id=msg.message_id)
         
-        bot.edit_message_text("⏳ [3/4] تم تشغيل المحرك! جاري الاتصال بالرابط...", chat_id=message.chat.id, message_id=msg.message_id)
+        # التكتيك: الدخول لجوجل العادي أولاً
+        driver.get("https://accounts.google.com")
+        time.sleep(3) # ننتظر قليلاً لتبادل ملفات الارتباط (Cookies)
+        
+        # الآن ننتقل للرابط الهدف
+        bot.edit_message_text("⏳ [4/4] جاري الدخول للرابط الهدف وبدء البث...", chat_id=message.chat.id, message_id=msg.message_id)
         driver.get(TARGET_URL)
-        
-        bot.edit_message_text("✅ [4/4] تم فتح الرابط بنجاح! جاري بدء البث المباشر 📸...", chat_id=message.chat.id, message_id=msg.message_id)
         
         while True:
             screenshot = driver.get_screenshot_as_png()
@@ -77,6 +65,9 @@ def start_livestream(message):
     finally:
         if 'driver' in locals() and driver is not None:
             driver.quit()
+        # إيقاف الشاشة الوهمية لتوفير الذاكرة
+        if 'display' in locals():
+            display.stop()
 
-print("البوت يعمل الآن ومستعد للبث...")
+print("البوت الاحترافي يعمل الآن ومستعد للبث...")
 bot.infinity_polling()
