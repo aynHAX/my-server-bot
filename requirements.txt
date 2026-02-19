@@ -2,4 +2,3 @@ pyTelegramBotAPI
 selenium
 undetected-chromedriver
 PyVirtualDisplay
-webdriver-manager
