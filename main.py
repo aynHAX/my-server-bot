@@ -5,6 +5,7 @@ import traceback
 from io import BytesIO
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium_stealth import stealth # استيراد مكتبة التمويه
 
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 bot = telebot.TeleBot(BOT_TOKEN)
@@ -17,16 +18,23 @@ def send_welcome(message):
 
 @bot.message_handler(commands=['live'])
 def start_livestream(message):
-    msg = bot.reply_to(message, "⏳ [1/4] جاري تجهيز إعدادات المتصفح للعمل في وضع التصفح الخفي (Private Tab)...")
+    msg = bot.reply_to(message, "⏳ [1/4] جاري تجهيز إعدادات التمويه (Stealth) لتخطي حماية جوجل...")
     
     options = Options()
     options.binary_location = "/usr/bin/brave-browser"
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    
-    # --- إضافة وضع التصفح الخفي هنا ---
     options.add_argument("--incognito") 
+    
+    # --- إعدادات تخطي الحماية (Anti-Bot) ---
+    # 1. إخفاء حقيقة أننا نستخدم نظام آلي
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option('useAutomationExtension', False)
+    
+    # 2. تزييف هوية المتصفح ليبدو كأنه يعمل من كمبيوتر ويندوز عادي وليس سيرفر لينكس
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
     
     # --- إعدادات توفير الذاكرة (RAM) الإجبارية ---
     options.add_argument("--disable-gpu")
@@ -36,8 +44,19 @@ def start_livestream(message):
     options.add_argument("--js-flags=--expose-gc") 
     
     try:
-        bot.edit_message_text("⏳ [2/4] جاري تشغيل محرك Brave...", chat_id=message.chat.id, message_id=msg.message_id)
+        bot.edit_message_text("⏳ [2/4] جاري تشغيل محرك Brave مع التمويه...", chat_id=message.chat.id, message_id=msg.message_id)
         driver = webdriver.Chrome(options=options)
+        
+        # --- تطبيق مكتبة Stealth ---
+        # هذا الجزء يغير بصمة الـ JavaScript للمتصفح ليخدع جوجل تماماً
+        stealth(driver,
+            languages=["en-US", "en"],
+            vendor="Google Inc.",
+            platform="Win32",
+            webgl_vendor="Intel Inc.",
+            renderer="Intel Iris OpenGL Engine",
+            fix_hairline=True,
+        )
         
         bot.edit_message_text("⏳ [3/4] تم تشغيل المحرك! جاري الاتصال بالرابط...", chat_id=message.chat.id, message_id=msg.message_id)
         driver.get(TARGET_URL)
