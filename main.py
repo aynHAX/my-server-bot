@@ -17,23 +17,30 @@ def send_welcome(message):
 
 @bot.message_handler(commands=['live'])
 def start_livestream(message):
-    msg = bot.reply_to(message, "⏳ جاري تهيئة متصفح Brave ذاتياً والاتصال بالرابط...")
+    # استخدام نظام الخطوات لنعرف أين يموت البوت بالضبط
+    msg = bot.reply_to(message, "⏳ [1/4] جاري تجهيز إعدادات المتصفح للعمل بذاكرة منخفضة...")
     
     options = Options()
     options.binary_location = "/usr/bin/brave-browser"
-    options.add_argument("--headless")
+    options.add_argument("--headless=new") # استخدام النظام المخفي الحديث
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--window-size=1920,1080")
+    
+    # --- إعدادات توفير الذاكرة (RAM) الإجبارية ---
     options.add_argument("--disable-gpu")
+    options.add_argument("--disable-software-rasterizer")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--window-size=1280,720") # تقليل الدقة لتقليل حجم الصورة بالرام
+    options.add_argument("--js-flags=--expose-gc") # مساعدة المتصفح في تفريغ الذاكرة
     
     try:
-        # الاعتماد الكلي على Selenium Manager المدمج تلقائياً
+        bot.edit_message_text("⏳ [2/4] جاري تشغيل محرك Brave (قد يستغرق دقيقة للتحميل)...", chat_id=message.chat.id, message_id=msg.message_id)
         driver = webdriver.Chrome(options=options)
         
+        bot.edit_message_text("⏳ [3/4] تم تشغيل المحرك! جاري الاتصال بالرابط...", chat_id=message.chat.id, message_id=msg.message_id)
         driver.get(TARGET_URL)
         
-        bot.edit_message_text("✅ تم الدخول للرابط! جاري بدء البث المباشر...", chat_id=message.chat.id, message_id=msg.message_id)
+        bot.edit_message_text("✅ [4/4] تم فتح الرابط بنجاح! جاري بدء البث المباشر 📸...", chat_id=message.chat.id, message_id=msg.message_id)
         
         while True:
             screenshot = driver.get_screenshot_as_png()
@@ -41,10 +48,9 @@ def start_livestream(message):
             photo.name = 'screen.png'
             
             bot.send_photo(message.chat.id, photo)
-            time.sleep(2) 
+            time.sleep(3) # زدنا وقت الراحة لـ 3 ثوانٍ لتخفيف الضغط على خادم Koyeb
             
     except Exception as e:
-        # التقاط الخطأ بالتفصيل الممل لتسهيل الحل إن وجد
         error_details = traceback.format_exc()
         bot.send_message(message.chat.id, f"❌ حدث خطأ:\n{e}\n\nالتفاصيل:\n{error_details[-800:]}")
     finally:
