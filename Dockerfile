@@ -1,18 +1,17 @@
-FROM mcr.microsoft.com/playwright/python:v1.58.0-jammy
+# استخدام نسخة بايثون خفيفة لتسريع البناء وتقليل الحجم
+FROM python:3.11-slim
 
+# تحديد مجلد العمل داخل الحاوية
 WORKDIR /app
 
-# 1. تثبيت برنامج الشاشة الوهمية (Xvfb)
-RUN apt-get update && apt-get install -y xvfb
-
-# 2. نسخ وتثبيت مكتبات بايثون
+# نسخ ملف المكتبات أولاً (للاستفادة من ميزة التخزين المؤقت في Docker)
 COPY requirements.txt .
+
+# تثبيت المكتبات المطلوبة
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 3. نسخ ملف التشغيل وباقي الملفات
-COPY start.sh .
+# نسخ باقي ملفات المشروع إلى الحاوية
 COPY . .
 
-# 4. إعطاء صلاحية التشغيل للملف والبدء
-RUN chmod +x start.sh
-CMD ["./start.sh"]
+# الأمر الذي سيتم تنفيذه لتشغيل البوت
+CMD ["python", "main.py"]
