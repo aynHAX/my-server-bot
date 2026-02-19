@@ -1,3 +1,38 @@
+import asyncio
+import os
+import random
+import re
+from telegram import Update, InputMediaPhoto
+from telegram.error import BadRequest
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from playwright.async_api import async_playwright
+import playwright_stealth as p_stealth
+
+from flask import Flask
+import threading
+
+# -----------------------------------------
+# 1. إعداد خادم الويب الوهمي لإرضاء Koyeb
+# -----------------------------------------
+app = Flask(__name__)
+
+@app.route('/')
+def index():
+    return "Playwright Bot is running perfectly!"
+
+def run_flask():
+    port = int(os.environ.get('PORT', 8000))
+    app.run(host="0.0.0.0", port=port)
+
+# -----------------------------------------
+# 2. إعداد بوت التيليغرام ومتغيرات البيئة
+# -----------------------------------------
+TOKEN = os.environ.get('BOT_TOKEN') # جلب التوكن من إعدادات Koyeb لحمايته
+if not TOKEN:
+    raise ValueError("لم يتم العثور على BOT_TOKEN. تأكد من إضافته في إعدادات Koyeb.")
+
+active_sessions = {}
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     if not context.args:
@@ -15,7 +50,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             browser = await p.chromium.launch(
                 headless=True,
                 args=[
-                    '--headless=new', # 👈 السحر الأول: وضع Headless الجديد الذي لا يكتشفه جوجل
+                    '--headless=new', # السحر الأول: وضع Headless الجديد
                     '--disable-blink-features=AutomationControlled',
                     '--no-sandbox', 
                     '--disable-setuid-sandbox',
@@ -51,7 +86,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
 
-            # 3. 👈 السحر الثاني: خدعة الإحماء (Warm-up)
+            # 3. السحر الثاني: خدعة الإحماء (Warm-up)
             print("⏳ جاري زرع ملفات تعريف الارتباط الموثوقة...")
             await page.goto("https://www.google.com", timeout=60000, wait_until="commit")
             await page.mouse.move(random.randint(100, 400), random.randint(100, 400))
@@ -69,6 +104,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
             while active_sessions.get(chat_id, {}).get('is_running'):
+                
                 current_step = active_sessions.get(chat_id, {}).get('step')
 
                 # 📌 المرحلة 1: قبول شروط جوجل
@@ -177,8 +213,29 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=chat_id, text="⏹️ تم إغلاق الجلسة بنجاح.")
             
     except Exception as e:
+        # هنا تم قص رسالة الخطأ لتجنب مشكلة (Message is too long) في تيليغرام
         error_message = str(e)[:500] 
         await update.message.reply_text(f"❌ حدث خطأ، التفاصيل (مختصرة):\n{error_message}")
     finally:
         if chat_id in active_sessions: 
             del active_sessions[chat_id]
+
+async def stop_stream(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    if chat_id in active_sessions:
+        active_sessions[chat_id]['is_running'] = False
+        await update.message.reply_text("⏳ جاري الإغلاق...")
+
+if __name__ == '__main__':
+    print("🚀 جاري تشغيل خادم الويب والبوت...")
+    
+    # تشغيل خادم الويب في مسار منفصل
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
+
+    # تشغيل البوت
+    application = ApplicationBuilder().token(TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("stop", stop_stream))
+    application.run_polling()
