@@ -6,7 +6,6 @@ from telegram import Update, InputMediaPhoto
 from telegram.error import BadRequest
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from playwright.async_api import async_playwright
-import playwright_stealth as p_stealth
 
 from flask import Flask
 import threading
@@ -18,7 +17,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def index():
-    return "Playwright Bot is running perfectly!"
+    return "Firefox Playwright Bot is running perfectly!"
 
 def run_flask():
     port = int(os.environ.get('PORT', 8000))
@@ -42,51 +41,33 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw_url = context.args[0]
     active_sessions[chat_id] = {'is_running': True, 'step': 'accept_terms'}
     
-    await update.message.reply_text("🎭 جاري محاكاة 'سلوك بشري' بوضع التصفح الخفي المتقدم...")
+    await update.message.reply_text("🦊 جاري محاكاة متصفح Firefox لتخطي حماية جوجل...")
 
     try:
         async with async_playwright() as p:
-            # 1. استخدام النواة الجديدة والتخفي العميق
-            browser = await p.chromium.launch(
+            # 1. التبديل إلى Firefox للهروب من رادار جوجل
+            browser = await p.firefox.launch(
                 headless=True,
-                args=[
-                    '--headless=new', # السحر الأول: وضع Headless الجديد
-                    '--disable-blink-features=AutomationControlled',
-                    '--no-sandbox', 
-                    '--disable-setuid-sandbox',
-                    '--window-size=1920,1080',
-                    '--disable-features=IsolateOrigins,site-per-process',
-                    '--disable-site-isolation-trials'
-                ]
+                args=['--window-size=1920,1080']
             )
             
-            # 2. تزوير البصمة لتطابق ويندوز حقيقي 100%
+            # 2. تزوير البصمة لتطابق متصفح فايرفوكس على ويندوز
             browser_context = await browser.new_context(
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0',
                 viewport={'width': 1920, 'height': 1080},
                 locale='en-US',
                 timezone_id='America/New_York',
                 extra_http_headers={
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Sec-Ch-Ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
-                    'Sec-Ch-Ua-Mobile': '?0',
-                    'Sec-Ch-Ua-Platform': '"Windows"'
+                    'Accept-Language': 'en-US,en;q=0.5',
+                    'DNT': '1', # إخبار المواقع بعدم التتبع (سلوك بشري طبيعي في فايرفوكس)
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1'
                 }
             )
             
             page = await browser_context.new_page()
-            
-            try:
-                if hasattr(p_stealth, 'stealth_async'):
-                    await p_stealth.stealth_async(page)
-                elif hasattr(p_stealth, 'stealth'):
-                    await p_stealth.stealth(page)
-                else:
-                    await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-            except Exception:
-                pass
 
-            # 3. السحر الثاني: خدعة الإحماء (Warm-up)
+            # 3. خدعة الإحماء (Warm-up)
             print("⏳ جاري زرع ملفات تعريف الارتباط الموثوقة...")
             await page.goto("https://www.google.com", timeout=60000, wait_until="commit")
             await page.mouse.move(random.randint(100, 400), random.randint(100, 400))
@@ -100,7 +81,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             live_message = await context.bot.send_photo(
                 chat_id=chat_id, 
                 photo=screenshot_bytes, 
-                caption="🔴 بث مباشر (التخفي المتقدم)\nأرسل /stop للإنهاء\n⏳ جاري تنفيذ المهام..."
+                caption="🔴 بث مباشر (فايرفوكس)\nأرسل /stop للإنهاء\n⏳ جاري تنفيذ المهام..."
             )
 
             while active_sessions.get(chat_id, {}).get('is_running'):
