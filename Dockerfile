@@ -1,15 +1,13 @@
-FROM python:3.11
+# استخدام الصورة الرسمية من مايكروسوفت (جاهزة بكل مكتبات المتصفحات ونظام لينكس)
+FROM mcr.microsoft.com/playwright/python:v1.41.0-jammy
 
 WORKDIR /app
 
-# نسخ ملف المكتبات وتثبيتها
+# نسخ وتثبيت مكتبات بايثون
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# تثبيت متصفح كروم مع ملفات نظام لينكس الأساسية لتشغيله
-RUN playwright install --with-deps chromium
-
-# نسخ باقي ملفات البوت
+# نسخ باقي ملفات المشروع
 COPY . .
 
 # أمر تشغيل البوت
