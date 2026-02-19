@@ -1,17 +1,22 @@
-# استخدام نسخة بايثون خفيفة لتسريع البناء وتقليل الحجم
 FROM python:3.11-slim
 
-# تحديد مجلد العمل داخل الحاوية
 WORKDIR /app
 
-# نسخ ملف المكتبات أولاً (للاستفادة من ميزة التخزين المؤقت في Docker)
-COPY requirements.txt .
+# تثبيت الأدوات الأساسية المطلوبة لتحميل Brave
+RUN apt-get update && apt-get install -y curl gnupg unzip wget
 
-# تثبيت المكتبات المطلوبة
+# إضافة مفتاح ومستودع متصفح Brave الرسمي
+RUN curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+RUN echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main"|tee /etc/apt/sources.list.d/brave-browser-release.list
+
+# تثبيت متصفح Brave
+RUN apt-get update && apt-get install -y brave-browser
+
+# نسخ وتثبيت مكتبات بايثون
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# نسخ باقي ملفات المشروع إلى الحاوية
+# نسخ باقي ملفات البوت
 COPY . .
 
-# الأمر الذي سيتم تنفيذه لتشغيل البوت
 CMD ["python", "main.py"]
