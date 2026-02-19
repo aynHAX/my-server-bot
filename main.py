@@ -8,7 +8,7 @@ from telebot.types import InputMediaPhoto
 from flask import Flask
 from playwright.sync_api import sync_playwright
 from telebot.apihelper import ApiTelegramException
-from playwright_stealth import stealth_sync  # مكتبة التخفي الجديدة
+from playwright_stealth import stealth_sync
 
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 if not BOT_TOKEN:
@@ -22,14 +22,14 @@ browser_lock = threading.Lock()
 
 @app.route('/')
 def health_check():
-    return "Bot is running perfectly with Stealth Mode!"
+    return "Bot is running with Virtual Screen Magic!"
 
 def run_flask():
     app.run(host="0.0.0.0", port=8000, debug=False, use_reloader=False)
 
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
-    bot.reply_to(message, "مرحباً! أرسل لي رابط Google Skills وسأقوم بفتحه متجاوزاً حماية جوجل 🔴")
+    bot.reply_to(message, "مرحباً! أرسل لي رابط Google Skills وسأقوم بفتحه بالطريقة الخارقة 🔴")
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
@@ -44,14 +44,14 @@ def handle_message(message):
         return
 
     with browser_lock:
-        wait_msg = bot.reply_to(message, "جاري الدخول بوضع التخفي العميق (Stealth Mode) لتجاوز حماية جوجل... 🕵️‍♂️")
+        wait_msg = bot.reply_to(message, "جاري تطبيق الخدعة الخارقة (شاشة وهمية + متصفح مرئي + إحماء)... 🪄🎩")
         screenshot_path = f"screenshot_{message.chat.id}.jpg" 
         
         try:
             with sync_playwright() as p:
-                # إعدادات إطلاق المتصفح
+                # السحر هنا: headless=False المتصفح مرئي بالكامل داخل الشاشة الوهمية للسيرفر!
                 browser = p.chromium.launch(
-                    headless=True,
+                    headless=False,
                     args=[
                         "--disable-dev-shm-usage", 
                         "--no-sandbox", 
@@ -61,29 +61,33 @@ def handle_message(message):
                     ]
                 )
                 
-                # إضافة User-Agent واقعي جداً
                 real_user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
                 
                 context = browser.new_context(
                     viewport={'width': 1280, 'height': 720},
-                    user_agent=real_user_agent
+                    user_agent=real_user_agent,
+                    locale="en-US"
                 )
                 
-                # حقن كود خفي لحذف أي أثر للبوت
+                # إخفاء آثار البوت
                 context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
                 
                 page = context.new_page()
-                
-                # تفعيل وضع التخفي (Stealth) على الصفحة قبل فتح الرابط
                 stealth_sync(page)
                 
-                # التوجه للرابط
+                # ---------- خدعة الإحماء وبناء الثقة (Warm-up) ----------
+                # الذهاب إلى صفحة جوجل العادية أولاً لتبدو كإنسان طبيعي يفتح المتصفح
+                page.goto("https://www.google.com", timeout=60000)
+                time.sleep(2) # الانتظار لثانيتين كأنك تكتب الرابط
+                # -------------------------------------------------------
+                
+                # الآن الانقضاض على رابط مهارات جوجل!
                 page.goto(text, timeout=60000)
                 
                 page.screenshot(path=screenshot_path, type="jpeg", quality=40)
                 
                 with open(screenshot_path, 'rb') as photo:
-                    stream_msg = bot.send_photo(message.chat.id, photo, caption="🔴 بث مباشر (Stealth Mode)...")
+                    stream_msg = bot.send_photo(message.chat.id, photo, caption="🔴 بث مباشر (جاري التخطي الخارق)...")
                     
                 try:
                     bot.delete_message(message.chat.id, wait_msg.message_id)
@@ -97,7 +101,7 @@ def handle_message(message):
                     
                     try:
                         with open(screenshot_path, 'rb') as photo:
-                            media = InputMediaPhoto(photo, caption="🔴 بث مباشر (Stealth Mode)...")
+                            media = InputMediaPhoto(photo, caption="🔴 بث مباشر (جاري التخطي الخارق)...")
                             bot.edit_message_media(chat_id=message.chat.id, message_id=stream_msg.message_id, media=media)
                     
                     except ApiTelegramException as e:
