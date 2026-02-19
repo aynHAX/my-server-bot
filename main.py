@@ -1,12 +1,10 @@
 import telebot
 import os
 import time
+import traceback
 from io import BytesIO
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
-from webdriver_manager.core.os_manager import ChromeType # الاستيراد الجديد هنا
 
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 bot = telebot.TeleBot(BOT_TOKEN)
@@ -19,7 +17,7 @@ def send_welcome(message):
 
 @bot.message_handler(commands=['live'])
 def start_livestream(message):
-    msg = bot.reply_to(message, "⏳ جاري تهيئة متصفح Brave والاتصال بالرابط...")
+    msg = bot.reply_to(message, "⏳ جاري تهيئة متصفح Brave ذاتياً والاتصال بالرابط...")
     
     options = Options()
     options.binary_location = "/usr/bin/brave-browser"
@@ -27,11 +25,11 @@ def start_livestream(message):
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
+    options.add_argument("--disable-gpu")
     
     try:
-        # التعديل الأهم هنا: إخبار المكتبة بالبحث عن إصدار Brave وتنزيل الدرايفر المطابق له
-        driver_service = Service(ChromeDriverManager(chrome_type=ChromeType.BRAVE).install())
-        driver = webdriver.Chrome(service=driver_service, options=options)
+        # الاعتماد الكلي على Selenium Manager المدمج تلقائياً
+        driver = webdriver.Chrome(options=options)
         
         driver.get(TARGET_URL)
         
@@ -46,9 +44,11 @@ def start_livestream(message):
             time.sleep(2) 
             
     except Exception as e:
-        bot.send_message(message.chat.id, f"❌ حدث خطأ أثناء تشغيل المتصفح: {e}")
+        # التقاط الخطأ بالتفصيل الممل لتسهيل الحل إن وجد
+        error_details = traceback.format_exc()
+        bot.send_message(message.chat.id, f"❌ حدث خطأ:\n{e}\n\nالتفاصيل:\n{error_details[-800:]}")
     finally:
-        if 'driver' in locals():
+        if 'driver' in locals() and driver is not None:
             driver.quit()
 
 print("البوت يعمل الآن ومستعد للبث...")
