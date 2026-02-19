@@ -17,24 +17,26 @@ def send_welcome(message):
 
 @bot.message_handler(commands=['live'])
 def start_livestream(message):
-    # استخدام نظام الخطوات لنعرف أين يموت البوت بالضبط
-    msg = bot.reply_to(message, "⏳ [1/4] جاري تجهيز إعدادات المتصفح للعمل بذاكرة منخفضة...")
+    msg = bot.reply_to(message, "⏳ [1/4] جاري تجهيز إعدادات المتصفح للعمل في وضع التصفح الخفي (Private Tab)...")
     
     options = Options()
     options.binary_location = "/usr/bin/brave-browser"
-    options.add_argument("--headless=new") # استخدام النظام المخفي الحديث
+    options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
+    
+    # --- إضافة وضع التصفح الخفي هنا ---
+    options.add_argument("--incognito") 
     
     # --- إعدادات توفير الذاكرة (RAM) الإجبارية ---
     options.add_argument("--disable-gpu")
     options.add_argument("--disable-software-rasterizer")
     options.add_argument("--disable-extensions")
-    options.add_argument("--window-size=1280,720") # تقليل الدقة لتقليل حجم الصورة بالرام
-    options.add_argument("--js-flags=--expose-gc") # مساعدة المتصفح في تفريغ الذاكرة
+    options.add_argument("--window-size=1280,720") 
+    options.add_argument("--js-flags=--expose-gc") 
     
     try:
-        bot.edit_message_text("⏳ [2/4] جاري تشغيل محرك Brave (قد يستغرق دقيقة للتحميل)...", chat_id=message.chat.id, message_id=msg.message_id)
+        bot.edit_message_text("⏳ [2/4] جاري تشغيل محرك Brave...", chat_id=message.chat.id, message_id=msg.message_id)
         driver = webdriver.Chrome(options=options)
         
         bot.edit_message_text("⏳ [3/4] تم تشغيل المحرك! جاري الاتصال بالرابط...", chat_id=message.chat.id, message_id=msg.message_id)
@@ -48,7 +50,7 @@ def start_livestream(message):
             photo.name = 'screen.png'
             
             bot.send_photo(message.chat.id, photo)
-            time.sleep(3) # زدنا وقت الراحة لـ 3 ثوانٍ لتخفيف الضغط على خادم Koyeb
+            time.sleep(3) 
             
     except Exception as e:
         error_details = traceback.format_exc()
