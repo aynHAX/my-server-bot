@@ -1,38 +1,3 @@
-import asyncio
-import os
-import random
-import re
-from telegram import Update, InputMediaPhoto
-from telegram.error import BadRequest
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-from playwright.async_api import async_playwright
-import playwright_stealth as p_stealth
-
-from flask import Flask
-import threading
-
-# -----------------------------------------
-# 1. إعداد خادم الويب الوهمي لإرضاء Koyeb
-# -----------------------------------------
-app = Flask(__name__)
-
-@app.route('/')
-def index():
-    return "Playwright Bot is running perfectly!"
-
-def run_flask():
-    port = int(os.environ.get('PORT', 8000))
-    app.run(host="0.0.0.0", port=port)
-
-# -----------------------------------------
-# 2. إعداد بوت التيليغرام ومتغيرات البيئة
-# -----------------------------------------
-TOKEN = os.environ.get('BOT_TOKEN') # جلب التوكن من إعدادات Koyeb لحمايته
-if not TOKEN:
-    raise ValueError("لم يتم العثور على BOT_TOKEN. تأكد من إضافته في إعدادات Koyeb.")
-
-active_sessions = {}
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     if not context.args:
@@ -42,25 +7,36 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     raw_url = context.args[0]
     active_sessions[chat_id] = {'is_running': True, 'step': 'accept_terms'}
     
-    await update.message.reply_text("🎭 جاري محاكاة 'سلوك بشري' بوضع التصفح النظيف (Incognito)...")
+    await update.message.reply_text("🎭 جاري محاكاة 'سلوك بشري' بوضع التصفح الخفي المتقدم...")
 
     try:
         async with async_playwright() as p:
+            # 1. استخدام النواة الجديدة والتخفي العميق
             browser = await p.chromium.launch(
                 headless=True,
                 args=[
+                    '--headless=new', # 👈 السحر الأول: وضع Headless الجديد الذي لا يكتشفه جوجل
                     '--disable-blink-features=AutomationControlled',
-                    '--start-maximized',
-                    '--disable-infobars',
                     '--no-sandbox', 
-                    '--disable-setuid-sandbox' 
+                    '--disable-setuid-sandbox',
+                    '--window-size=1920,1080',
+                    '--disable-features=IsolateOrigins,site-per-process',
+                    '--disable-site-isolation-trials'
                 ]
             )
             
+            # 2. تزوير البصمة لتطابق ويندوز حقيقي 100%
             browser_context = await browser.new_context(
                 user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                viewport={'width': 1920, 'height': 1080},
                 locale='en-US',
-                timezone_id='America/New_York'
+                timezone_id='America/New_York',
+                extra_http_headers={
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Sec-Ch-Ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+                    'Sec-Ch-Ua-Mobile': '?0',
+                    'Sec-Ch-Ua-Platform': '"Windows"'
+                }
             )
             
             page = await browser_context.new_page()
@@ -75,18 +51,24 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
 
+            # 3. 👈 السحر الثاني: خدعة الإحماء (Warm-up)
+            print("⏳ جاري زرع ملفات تعريف الارتباط الموثوقة...")
+            await page.goto("https://www.google.com", timeout=60000, wait_until="commit")
             await page.mouse.move(random.randint(100, 400), random.randint(100, 400))
+            await asyncio.sleep(2) # انتظار طبيعي كالبشر
+            
+            # 4. الآن ننتقل إلى رابط Qwiklabs المعقد
+            print("🚀 جاري الانتقال للرابط المطلوب...")
             await page.goto(raw_url, timeout=120000, wait_until="load")
             
             screenshot_bytes = await page.screenshot()
             live_message = await context.bot.send_photo(
                 chat_id=chat_id, 
                 photo=screenshot_bytes, 
-                caption="🔴 بث مباشر (وضع التخفي)\nأرسل /stop للإنهاء\n⏳ جاري تنفيذ المهام التسلسلية..."
+                caption="🔴 بث مباشر (التخفي المتقدم)\nأرسل /stop للإنهاء\n⏳ جاري تنفيذ المهام..."
             )
 
             while active_sessions.get(chat_id, {}).get('is_running'):
-                
                 current_step = active_sessions.get(chat_id, {}).get('step')
 
                 # 📌 المرحلة 1: قبول شروط جوجل
@@ -195,29 +177,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=chat_id, text="⏹️ تم إغلاق الجلسة بنجاح.")
             
     except Exception as e:
-        # هنا تم قص رسالة الخطأ لتجنب مشكلة (Message is too long) في تيليغرام
         error_message = str(e)[:500] 
         await update.message.reply_text(f"❌ حدث خطأ، التفاصيل (مختصرة):\n{error_message}")
     finally:
         if chat_id in active_sessions: 
             del active_sessions[chat_id]
-
-async def stop_stream(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    if chat_id in active_sessions:
-        active_sessions[chat_id]['is_running'] = False
-        await update.message.reply_text("⏳ جاري الإغلاق...")
-
-if __name__ == '__main__':
-    print("🚀 جاري تشغيل خادم الويب والبوت...")
-    
-    # تشغيل خادم الويب في مسار منفصل
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.daemon = True
-    flask_thread.start()
-
-    # تشغيل البوت
-    application = ApplicationBuilder().token(TOKEN).build()
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("stop", stop_stream))
-    application.run_polling()
