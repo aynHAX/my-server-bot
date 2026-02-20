@@ -31,14 +31,12 @@ def start_livestream(message):
         bot.edit_message_text("⏳ [2/5] جاري تجهيز المتصفح المضاد للاكتشاف (بدون تحميل خارجي)...", chat_id=message.chat.id, message_id=msg.message_id)
         
         options = uc.ChromeOptions()
-        # توجيه المكتبة للمتصفح المثبت في النظام
         options.binary_location = "/usr/bin/chromium"
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--incognito")
         options.add_argument("--disable-gpu")
         
-        # إجبار المكتبة على استخدام الدرايفر المثبت مسبقاً لمنع أخطاء فك الضغط
         driver = uc.Chrome(options=options, use_subprocess=True, driver_executable_path="/usr/bin/chromedriver")
         
         bot.edit_message_text("⏳ [3/5] تم تشغيل المحرك! جاري خداع أنظمة جوجل...", chat_id=message.chat.id, message_id=msg.message_id)
@@ -49,35 +47,33 @@ def start_livestream(message):
         bot.edit_message_text("⏳ [4/5] جاري الدخول للرابط الهدف...", chat_id=message.chat.id, message_id=msg.message_id)
         driver.get(TARGET_URL)
         
-        bot.edit_message_text("⏳ [5/5] جاري البحث عن زر 'I understand' والضغط عليه...", chat_id=message.chat.id, message_id=msg.message_id)
+        bot.edit_message_text("⏳ [5/5] جاري الضغط على زر الموافقة...", chat_id=message.chat.id, message_id=msg.message_id)
         
-        # ---------------- التعديل لضمان الضغط بنجاح ----------------
+        # ---------------- التعديل النهائي لضمان الضغط بنجاح ----------------
         try:
-            time.sleep(5) # انتظار إضافي لضمان تحميل الصفحة بالكامل
+            time.sleep(5) 
             
-            # محاولة 1: الضغط باستخدام Javascript (الأقوى لتخطي طبقات جوجل)
+            # محاولة 1: بناءً على الكود الخاص بك، نستهدف id="confirm" مباشرة بالجافاسكريبت
             js_script = """
-            var elements = document.querySelectorAll('span, button, div');
-            for (var i = 0; i < elements.length; i++) {
-                if (elements[i].innerText && elements[i].innerText.trim().toLowerCase() === 'i understand') {
-                    elements[i].click();
-                    return true;
-                }
+            var btn = document.getElementById('confirm');
+            if(btn) {
+                btn.click();
+                return true;
             }
             return false;
             """
             clicked = driver.execute_script(js_script)
             
-            # محاولة 2: إذا فشل الـ JS، نستخدم XPath محسّن يبحث داخل جميع العناصر
+            # محاولة 2 (احتياطية): استخدام Selenium لاستهداف المعرف confirm
             if not clicked:
                 understand_btn = WebDriverWait(driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH, "//span[contains(text(), 'I understand')] | //button[contains(., 'I understand')] | //*[normalize-space(text())='I understand']"))
+                    EC.element_to_be_clickable((By.ID, "confirm"))
                 )
                 understand_btn.click()
                 
-            time.sleep(5) # انتظار ما بعد الضغط لتحميل لوحة التحكم
+            time.sleep(6) # انتظار ما بعد الضغط لتحميل الصفحة التالية
         except Exception as e:
-            print("لم يظهر زر 'I understand' أو تم تجاوزه بالفعل.")
+            print("لم يتمكن من الضغط على الزر: ", e)
         # -----------------------------------------------------------
 
         screenshot = driver.get_screenshot_as_png()
@@ -103,7 +99,7 @@ def start_livestream(message):
                 if "is not modified" in str(update_error).lower():
                     continue
                 else:
-                    print(f"Ignored minor error: {update_error}")
+                    pass
             
     except Exception as e:
         error_details = traceback.format_exc()
