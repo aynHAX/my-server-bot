@@ -50,14 +50,35 @@ def start_livestream(message):
         driver.get(TARGET_URL)
         
         bot.edit_message_text("⏳ [5/5] جاري البحث عن زر 'I understand' والضغط عليه...", chat_id=message.chat.id, message_id=msg.message_id)
+        
+        # ---------------- التعديل لضمان الضغط بنجاح ----------------
         try:
-            understand_btn = WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, "//*[contains(translate(text(), 'I UNDERSTAND', 'i understand'), 'i understand') or contains(text(), 'أفهم') or contains(text(), 'أوافق')]"))
-            )
-            understand_btn.click()
-            time.sleep(5) 
+            time.sleep(5) # انتظار إضافي لضمان تحميل الصفحة بالكامل
+            
+            # محاولة 1: الضغط باستخدام Javascript (الأقوى لتخطي طبقات جوجل)
+            js_script = """
+            var elements = document.querySelectorAll('span, button, div');
+            for (var i = 0; i < elements.length; i++) {
+                if (elements[i].innerText && elements[i].innerText.trim().toLowerCase() === 'i understand') {
+                    elements[i].click();
+                    return true;
+                }
+            }
+            return false;
+            """
+            clicked = driver.execute_script(js_script)
+            
+            # محاولة 2: إذا فشل الـ JS، نستخدم XPath محسّن يبحث داخل جميع العناصر
+            if not clicked:
+                understand_btn = WebDriverWait(driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, "//span[contains(text(), 'I understand')] | //button[contains(., 'I understand')] | //*[normalize-space(text())='I understand']"))
+                )
+                understand_btn.click()
+                
+            time.sleep(5) # انتظار ما بعد الضغط لتحميل لوحة التحكم
         except Exception as e:
             print("لم يظهر زر 'I understand' أو تم تجاوزه بالفعل.")
+        # -----------------------------------------------------------
 
         screenshot = driver.get_screenshot_as_png()
         photo = BytesIO(screenshot)
