@@ -2,12 +2,10 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# قمنا بإزالة libgconf-2-4 من هنا لأن النظام لم يعد يحتاجها
+# تثبيت الشاشة الوهمية + متصفح Chromium والدرايفر المطابق له تماماً
 RUN apt-get update && apt-get install -y \
     curl gnupg unzip wget xvfb \
-    chromium chromium-driver \
-    fonts-liberation libnss3 libfontconfig1 \
-    && rm -rf /var/lib/apt/lists/*
+    chromium chromium-driver
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
