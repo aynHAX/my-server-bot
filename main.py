@@ -37,23 +37,21 @@ def run_dummy_server():
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# --- دالة التقاط الصور التيربو (صاروخية الرفع) ---
+# --- دالة التقاط الصور التيربو ---
 def get_light_jpg_screenshot(driver):
     png_data = driver.get_screenshot_as_png()
     img = Image.open(BytesIO(png_data))
     img = img.convert('RGB')
-    # تصغير الحجم لتسريع المعالجة والرفع
-    img.thumbnail((640, 480)) 
+    img.thumbnail((800, 600)) # حجم متوازن للوضوح والسرعة
     output = BytesIO()
-    # ضغط قاسي بنسبة 25 لتحويل الصورة لوزن الريشة
-    img.save(output, format='JPEG', quality=25, optimize=True)
+    img.save(output, format='JPEG', quality=30, optimize=True)
     output.seek(0)
     output.name = 'screen.jpg'
     return output
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "أهلاً بك! البوت يعمل الآن بقوة (النسخة التيربو ⚡) على خوادم Koyeb. أرسل /live للبدء 🚀")
+    bot.reply_to(message, "أهلاً بك! البوت يعمل الآن بقوة (النسخة التيربو المستقرة ⚡) على خوادم Koyeb. أرسل /live للبدء 🚀")
 
 @bot.message_handler(commands=['live'])
 def ask_for_sso_url(message):
@@ -103,7 +101,6 @@ def start_livestream(message):
 
     msg = bot.reply_to(message, "⚡ [1/7] جاري تجهيز البيئة السريعة...")
     
-    # لون 24 بت لمنع الشاشة البيضاء في Docker
     display = Display(visible=0, size=(1280, 720), color_depth=24)
     display.start()
     
@@ -119,13 +116,11 @@ def start_livestream(message):
         options.add_argument("--disable-software-rasterizer")
         options.add_argument("--window-size=1280,720")
         
-        # --- أوامر التيربو لتخفيف المتصفح ---
         options.add_argument("--disable-extensions")
         options.add_argument("--mute-audio")
         options.add_argument("--disable-notifications")
         options.add_argument("--disable-popup-blocking")
         options.add_argument("--disable-default-apps")
-        # ----------------------------------------------
         
         driver = uc.Chrome(
             options=options, 
@@ -135,7 +130,7 @@ def start_livestream(message):
         )
         
         driver.set_window_size(1280, 720)
-        driver.set_page_load_timeout(30)
+        driver.set_page_load_timeout(45) # مهلة أطول لتجنب انهيار Koyeb
         
         bot.edit_message_text("⚡ [2/7] المحرك جاهز! بدء عملية الاختراق...", chat_id=message.chat.id, message_id=msg.message_id)
         
@@ -148,22 +143,30 @@ def start_livestream(message):
         
         bot.edit_message_text("⚡ [3/7] جاري تسجيل الدخول والقفز الفوري...", chat_id=message.chat.id, message_id=msg.message_id)
         
-        # --- السحر هنا: قفزة النينجا (تخطي الـ Dashboard بالكامل) ---
+        # --- تحديث الصورة لنرى صفحة الموافقة ---
         try:
-            # ننتظر ظهور زر الموافقة (I understand) ونضغطه
+            bot.edit_message_media(chat_id=message.chat.id, message_id=live_msg.message_id, media=InputMediaPhoto(get_light_jpg_screenshot(driver), caption="🔴 بث مباشر (مرحلة الموافقة)..."))
+        except: pass
+
+        # --- السحر هنا: قفزة النينجا ---
+        try:
             understand_btn = WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.ID, "confirm")))
             driver.execute_script("arguments[0].click();", understand_btn)
-            
-            # قفزة فورية للـ Cloud Shell بدون انتظار!
             driver.get(shell_url) 
         except Exception:
-            # إذا لم يجد الزر، يقفز مباشرة للـ Cloud Shell
             driver.get(shell_url)
 
         bot.edit_message_text("⚡ [4/7] جاري تحميل واجهة Cloud Shell...", chat_id=message.chat.id, message_id=msg.message_id)
         
         bot.edit_message_text("⚡ [5/7] تخويل الصلاحيات (Authorize)...", chat_id=message.chat.id, message_id=msg.message_id)
-        time.sleep(12) # انتظار تحميل الكلاود شيل (يحتاج وقتاً ليبني نفسه في سيرفرات جوجل)
+        
+        # --- تحديث الصورة أثناء تحميل التيرمينال لكي لا تظن أنه معلق ---
+        for _ in range(4): # 4 محاولات * 3 ثواني = 12 ثانية انتظار
+            time.sleep(3)
+            try:
+                bot.edit_message_media(chat_id=message.chat.id, message_id=live_msg.message_id, media=InputMediaPhoto(get_light_jpg_screenshot(driver), caption="🔴 بث مباشر (جاري تحميل الـ Cloud Shell)..."))
+            except: pass
+
         try:
             js_auth_script = """
             var btns = document.querySelectorAll('button, span, div');
@@ -205,9 +208,9 @@ def start_livestream(message):
             
         bot.delete_message(message.chat.id, msg.message_id)
 
-        # --- حلقة البث السريعة جداً (التيربو) ---
+        # --- حلقة البث المستقرة (السرعة القصوى الآمنة لتيليغرام) ---
         while True:
-            time.sleep(1.5) # أسرع مرتين! تحديث شبه فوري.
+            time.sleep(3) # 3 ثواني هو الوقت المثالي لمنع الحظر
             try:
                 photo = get_light_jpg_screenshot(driver)
                 bot.edit_message_media(
@@ -216,14 +219,18 @@ def start_livestream(message):
                     media=InputMediaPhoto(photo, caption=f"🔴 بث مباشر ⚡: {project_id}")
                 )
             except Exception as update_error:
-                if "is not modified" in str(update_error).lower():
-                    continue
+                error_msg = str(update_error).lower()
+                if "is not modified" in error_msg:
+                    continue # الصورة لم تتغير، لا بأس
+                elif "too many requests" in error_msg or "flood" in error_msg:
+                    print("⚠️ تيليغرام غاضب من السرعة، استراحة 5 ثوانٍ...")
+                    time.sleep(5) # تهدئة اللعب لتجنب الحظر
                 else:
-                    pass
+                    print(f"⚠️ خطأ أثناء التحديث المباشر: {update_error}")
             
     except Exception as e:
         error_details = traceback.format_exc()
-        bot.send_message(message.chat.id, f"❌ حدث خطأ:\n{e}\n\nالتفاصيل:\n{error_details[-800:]}")
+        bot.send_message(message.chat.id, f"❌ حدث خطأ داخلي:\n{e}\n\nالتفاصيل:\n{error_details[-800:]}")
     finally:
         if 'driver' in locals() and driver is not None:
             try: driver.quit()
@@ -235,7 +242,7 @@ def start_livestream(message):
 print("جاري تشغيل خادم الويب الوهمي لتخطي فحص Koyeb...")
 threading.Thread(target=run_dummy_server, daemon=True).start()
 
-print("البوت يعمل بوضع التيربو ⚡...")
+print("البوت يعمل بوضع التيربو المستقر ⚡...")
 
 while True:
     try:
