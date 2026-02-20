@@ -37,7 +37,7 @@ def run_dummy_server():
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 bot = telebot.TeleBot(BOT_TOKEN)
 
-TARGET_URL = "https://www.skills.google/google_sso?fallback=https%3A%2F%2Faccounts.google.com%2FAddSession%3Fservice%3Daccountsettings%26sarp%3D1%26continue%3Dhttps%253A%252F%252Fconsole.cloud.google.com%252Fhome%252Fdashboard%253Fproject%253Dqwiklabs-gcp-00-1557cd67848d%2526walkthrough_id%253Dhttps%25253A%25252F%25252Fwww.skills.google%25252Fdisplay_in_context%25253Fdisplay_token%25253D0seYTyegfp9dS1q8fDc7knKSCJST2qxJz3097rH8lO8%23Email%3Dstudent-04-07815351e64b%40qwiklabs.net&relay=https%3A%2F%2Fconsole.cloud.google.com%2Fhome%2Fdashboard%3Fproject%3Dqwiklabs-gcp-00-1557cd67848d%26walkthrough_id%3Dhttps%253A%252F%252Fwww.skills.google%252Fdisplay_in_context%253Fdisplay_token%253D0seYTyegfp9dS1q8fDc7knKSCJST2qxJz3097rH8lO8&token=SoqLeEqqZa1uhh769bUBkXuw1c5Qq5dC9YRony0s1Bk"
+TARGET_URL = "https://www.skills.google/google_sso?fallback=https%3A%2F%2Faccounts.google.com%2FAddSession%3Fservice%3Daccountsettings%26sarp%3D1%26continue%3Dhttps%253A%252F%252Fconsole.cloud.google.com%252Fhome%252Fdashboard%253Fproject%253Dqwiklabs-gcp-04-7870bd398a02%2526walkthrough_id%253Dhttps%25253A%25252F%25252Fwww.skills.google%25252Fdisplay_in_context%25253Fdisplay_token%25253D79l45xKEQwWJhKBuRX2Hw9ozw-4rRZFXpDmVU17TSC8%23Email%3Dstudent-04-07815351e64b%40qwiklabs.net&relay=https%3A%2F%2Fconsole.cloud.google.com%2Fhome%2Fdashboard%3Fproject%3Dqwiklabs-gcp-04-7870bd398a02%26walkthrough_id%3Dhttps%253A%252F%252Fwww.skills.google%252Fdisplay_in_context%253Fdisplay_token%253D79l45xKEQwWJhKBuRX2Hw9ozw-4rRZFXpDmVU17TSC8&token=7DjJMBeGTVygdCnV89AwF39SW97qgSJPj_-4nldLsLk"
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
