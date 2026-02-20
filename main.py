@@ -11,11 +11,9 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-# ---- المكتبات الجديدة لإنشاء الخادم الوهمي ----
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-# إعداد خادم الويب الوهمي للرد على فحوصات Koyeb
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -23,59 +21,74 @@ class DummyHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"Bot is Healthy and Running!")
     
-    # إخفاء سجلات الخادم حتى لا تزعجنا في الـ Logs
     def log_message(self, format, *args):
         pass
 
 def run_dummy_server():
-    # Koyeb تستخدم المنفذ 8000 بشكل افتراضي
     port = int(os.environ.get("PORT", 8000))
     server = HTTPServer(('0.0.0.0', port), DummyHandler)
     server.serve_forever()
-# ------------------------------------------------
 
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 bot = telebot.TeleBot(BOT_TOKEN)
 
-TARGET_URL = "https://www.skills.google/google_sso?fallback=https%3A%2F%2Faccounts.google.com%2FAddSession%3Fservice%3Daccountsettings%26sarp%3D1%26continue%3Dhttps%253A%252F%252Fconsole.cloud.google.com%252Fhome%252Fdashboard%253Fproject%253Dqwiklabs-gcp-04-7870bd398a02%2526walkthrough_id%253Dhttps%25253A%25252F%25252Fwww.skills.google%25252Fdisplay_in_context%25253Fdisplay_token%25253D79l45xKEQwWJhKBuRX2Hw9ozw-4rRZFXpDmVU17TSC8%23Email%3Dstudent-04-07815351e64b%40qwiklabs.net&relay=https%3A%2F%2Fconsole.cloud.google.com%2Fhome%2Fdashboard%3Fproject%3Dqwiklabs-gcp-04-7870bd398a02%26walkthrough_id%3Dhttps%253A%252F%252Fwww.skills.google%252Fdisplay_in_context%253Fdisplay_token%253D79l45xKEQwWJhKBuRX2Hw9ozw-4rRZFXpDmVU17TSC8&token=7DjJMBeGTVygdCnV89AwF39SW97qgSJPj_-4nldLsLk"
-
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "أهلاً بك! أرسل الأمر /live لبدء البث بالطريقة الخارقة 🚀")
+    bot.reply_to(message, "أهلاً بك! أرسل الأمر /live لبدء البث، وسأطلب منك الرابط 🚀")
 
 @bot.message_handler(commands=['live'])
+def ask_for_url(message):
+    # نطلب من المستخدم إرسال الرابط أولاً
+    msg = bot.reply_to(message, "🔗 الرجاء إرسال الرابط الذي تريد الدخول إليه وبثه:")
+    # نخبر البوت أن الخطوة القادمة هي استلام الرابط وتمريره لدالة التشغيل
+    bot.register_next_step_handler(msg, start_livestream)
+
 def start_livestream(message):
+    target_url = message.text
+    
+    # تحقق بسيط للتأكد من أن النص المرسل هو رابط فعلي
+    if not target_url.startswith("http"):
+        bot.reply_to(message, "❌ الرابط غير صالح. الرجاء إرسال رابط يبدأ بـ http أو https. أرسل /live للمحاولة مجدداً.")
+        return
+
     msg = bot.reply_to(message, "⏳ [1/5] جاري بناء الشاشة الوهمية (Xvfb) داخل السيرفر...")
     
     display = Display(visible=0, size=(1280, 720))
     display.start()
     
+    time.sleep(2)
+    
     try:
         bot.edit_message_text("⏳ [2/5] جاري تجهيز المتصفح المضاد للاكتشاف...", chat_id=message.chat.id, message_id=msg.message_id)
         
         options = uc.ChromeOptions()
-        options.binary_location = "/usr/bin/chromium"
         options.add_argument("--no-sandbox")
+        options.add_argument("--disable-setuid-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--incognito")
         options.add_argument("--disable-gpu")
+        options.add_argument("--disable-software-rasterizer")
         
-        driver = uc.Chrome(options=options, use_subprocess=True, driver_executable_path="/usr/bin/chromedriver")
+        driver = uc.Chrome(
+            options=options, 
+            use_subprocess=True, 
+            driver_executable_path="/usr/bin/chromedriver",
+            browser_executable_path="/usr/bin/chromium"
+        )
         
         bot.edit_message_text("⏳ [3/5] تم تشغيل المحرك! جاري خداع أنظمة جوجل...", chat_id=message.chat.id, message_id=msg.message_id)
         
         driver.get("https://accounts.google.com")
         time.sleep(3) 
         
-        bot.edit_message_text("⏳ [4/5] جاري الدخول للرابط الهدف...", chat_id=message.chat.id, message_id=msg.message_id)
-        driver.get(TARGET_URL)
+        bot.edit_message_text("⏳ [4/5] جاري الدخول للرابط الخاص بك...", chat_id=message.chat.id, message_id=msg.message_id)
+        driver.get(target_url) # هنا نستخدم الرابط الذي أرسلته في المحادثة
         
         bot.edit_message_text("⏳ [5/5] جاري الضغط على زر الموافقة...", chat_id=message.chat.id, message_id=msg.message_id)
         
         try:
             time.sleep(5) 
             
-            # استهداف زر confirm مباشرة كما اكتشفنا
             js_script = """
             var btn = document.getElementById('confirm');
             if(btn) {
@@ -130,8 +143,6 @@ def start_livestream(message):
         if 'display' in locals():
             display.stop()
 
-
-# ---- تشغيل الخادم الوهمي في الخلفية قبل تشغيل البوت ----
 print("جاري تشغيل خادم الويب الوهمي لتخطي فحص Koyeb...")
 threading.Thread(target=run_dummy_server, daemon=True).start()
 
