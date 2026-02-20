@@ -7,6 +7,10 @@ import undetected_chromedriver as uc
 from pyvirtualdisplay import Display
 from telebot.types import InputMediaPhoto
 
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 bot = telebot.TeleBot(BOT_TOKEN)
 
@@ -14,80 +18,47 @@ TARGET_URL = "https://www.skills.google/google_sso?fallback=https%3A%2F%2Faccoun
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "أهلاً بك! النظام جاهز بالكامل. أرسل /live للبدء 🚀")
+    bot.reply_to(message, "أهلاً بك! أرسل الأمر /live لبدء البث بالطريقة الخارقة 🚀")
 
 @bot.message_handler(commands=['live'])
 def start_livestream(message):
-    msg = bot.reply_to(message, "⏳ [1/6] جاري تهيئة الشاشة الوهمية (Xvfb)...")
+    msg = bot.reply_to(message, "⏳ [1/5] جاري بناء الشاشة الوهمية (Xvfb) داخل السيرفر...")
     
-    display = None
-    driver = None
+    display = Display(visible=0, size=(1280, 720))
+    display.start()
     
     try:
-        display = Display(visible=0, size=(1280, 720))
-        display.start()
-        
-        bot.edit_message_text("⏳ [2/6] جاري تشغيل المتصفح بأمان...", chat_id=message.chat.id, message_id=msg.message_id)
+        bot.edit_message_text("⏳ [2/5] جاري تجهيز المتصفح المضاد للاكتشاف (بدون تحميل خارجي)...", chat_id=message.chat.id, message_id=msg.message_id)
         
         options = uc.ChromeOptions()
+        # توجيه المكتبة للمتصفح المثبت في النظام
+        options.binary_location = "/usr/bin/chromium"
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--incognito")
         options.add_argument("--disable-gpu")
-        options.add_argument("--disable-extensions")
         
-        # التوجيه الصارم للمسارات لمنع التجمد أثناء البحث عن المتصفح
-        driver = uc.Chrome(
-            options=options,
-            browser_executable_path="/usr/bin/chromium",
-            driver_executable_path="/usr/bin/chromedriver",
-            use_subprocess=True
-        )
+        # إجبار المكتبة على استخدام الدرايفر المثبت مسبقاً لمنع أخطاء فك الضغط
+        driver = uc.Chrome(options=options, use_subprocess=True, driver_executable_path="/usr/bin/chromedriver")
         
-        # وضع حد زمني للتحميل حتى لا يعلق البوت للأبد
-        driver.set_page_load_timeout(30)
+        bot.edit_message_text("⏳ [3/5] تم تشغيل المحرك! جاري خداع أنظمة جوجل...", chat_id=message.chat.id, message_id=msg.message_id)
         
-        bot.edit_message_text("⏳ [3/6] تم تشغيل المحرك! جاري خداع جوجل...", chat_id=message.chat.id, message_id=msg.message_id)
         driver.get("https://accounts.google.com")
         time.sleep(3) 
         
-        bot.edit_message_text("⏳ [4/6] جاري الدخول للرابط الهدف...", chat_id=message.chat.id, message_id=msg.message_id)
+        bot.edit_message_text("⏳ [4/5] جاري الدخول للرابط الهدف...", chat_id=message.chat.id, message_id=msg.message_id)
         driver.get(TARGET_URL)
-        time.sleep(5) # انتظار أولي لتحميل الصفحة
         
-        bot.edit_message_text("⏳ [5/6] جاري اختراق وتخطي صفحة الشروط...", chat_id=message.chat.id, message_id=msg.message_id)
-        
-        # ---------------------------------------------------------
-        # كود الجافاسكريبت النهائي للبحث والضغط (مقاوم للفشل)
-        # ---------------------------------------------------------
-        js_click_code = """
-        let clicked = false;
-        let elements = document.querySelectorAll('button, div, span, a');
-        for (let i = 0; i < elements.length; i++) {
-            let text = elements[i].innerText || elements[i].textContent;
-            if (text && text.toLowerCase().includes('i understand')) {
-                elements[i].style.border = "5px solid red"; // تلوين الزر لتأكيد إيجاده
-                elements[i].click();
-                clicked = true;
-                break;
-            }
-        }
-        return clicked;
-        """
-        
-        # محاولة الضغط 3 مرات متتالية لضمان النتيجة
-        for attempt in range(3):
-            result = driver.execute_script(js_click_code)
-            if result:
-                print("تم الضغط بنجاح بواسطة JS!")
-                time.sleep(5) # انتظار الانتقال للوحة التحكم بعد الضغط
-                break
-            time.sleep(2) # إذا لم يجده، ينتظر ثانيتين ويحاول مجدداً
-            
-        bot.edit_message_text("✅ [6/6] تمت العملية! جاري بدء البث المباشر...", chat_id=message.chat.id, message_id=msg.message_id)
-        time.sleep(2)
+        bot.edit_message_text("⏳ [5/5] جاري البحث عن زر 'I understand' والضغط عليه...", chat_id=message.chat.id, message_id=msg.message_id)
+        try:
+            understand_btn = WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, "//*[contains(translate(text(), 'I UNDERSTAND', 'i understand'), 'i understand') or contains(text(), 'أفهم') or contains(text(), 'أوافق')]"))
+            )
+            understand_btn.click()
+            time.sleep(5) 
+        except Exception as e:
+            print("لم يظهر زر 'I understand' أو تم تجاوزه بالفعل.")
 
-        # التقاط أول صورة وبدء البث
         screenshot = driver.get_screenshot_as_png()
         photo = BytesIO(screenshot)
         photo.name = 'screen.png'
@@ -95,7 +66,6 @@ def start_livestream(message):
         bot.delete_message(message.chat.id, msg.message_id)
         live_msg = bot.send_photo(message.chat.id, photo, caption="🔴 بث مباشر للشاشة... (يتم التحديث تلقائياً)")
         
-        # حلقة البث المباشر
         while True:
             time.sleep(3) 
             screenshot = driver.get_screenshot_as_png()
@@ -112,22 +82,16 @@ def start_livestream(message):
                 if "is not modified" in str(update_error).lower():
                     continue
                 else:
-                    pass
+                    print(f"Ignored minor error: {update_error}")
             
     except Exception as e:
         error_details = traceback.format_exc()
-        bot.send_message(message.chat.id, f"❌ حدث خطأ غير متوقع:\n{e}\n\nالتفاصيل:\n{error_details[-800:]}")
+        bot.send_message(message.chat.id, f"❌ حدث خطأ:\n{e}\n\nالتفاصيل:\n{error_details[-800:]}")
     finally:
-        try:
-            if driver is not None:
-                driver.quit()
-        except:
-            pass
-        try:
-            if display is not None:
-                display.stop()
-        except:
-            pass
+        if 'driver' in locals() and driver is not None:
+            driver.quit()
+        if 'display' in locals():
+            display.stop()
 
 print("البوت الاحترافي يعمل الآن ومستعد للبث المستمر...")
 bot.infinity_polling()
