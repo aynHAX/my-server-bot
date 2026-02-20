@@ -23,7 +23,7 @@ class DummyHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Content-type', 'text/plain')
         self.end_headers()
-        self.wfile.write(b"Bot is Healthy and Running FAST on Koyeb!")
+        self.wfile.write(b"Bot is Healthy, Fast, and Running on Koyeb!")
     
     def log_message(self, format, *args):
         pass
@@ -42,7 +42,7 @@ def get_light_jpg_screenshot(driver):
     png_data = driver.get_screenshot_as_png()
     img = Image.open(BytesIO(png_data))
     img = img.convert('RGB')
-    # تصغير الحجم للنصف لتسريع المعالجة والرفع
+    # تصغير الحجم لتسريع المعالجة والرفع
     img.thumbnail((640, 480)) 
     output = BytesIO()
     # ضغط قاسي بنسبة 25 لتحويل الصورة لوزن الريشة
@@ -103,6 +103,7 @@ def start_livestream(message):
 
     msg = bot.reply_to(message, "⚡ [1/7] جاري تجهيز البيئة السريعة...")
     
+    # لون 24 بت لمنع الشاشة البيضاء في Docker
     display = Display(visible=0, size=(1280, 720), color_depth=24)
     display.start()
     
@@ -118,7 +119,7 @@ def start_livestream(message):
         options.add_argument("--disable-software-rasterizer")
         options.add_argument("--window-size=1280,720")
         
-        # --- أوامر التيربو الإضافية لتخفيف المتصفح ---
+        # --- أوامر التيربو لتخفيف المتصفح ---
         options.add_argument("--disable-extensions")
         options.add_argument("--mute-audio")
         options.add_argument("--disable-notifications")
@@ -143,26 +144,26 @@ def start_livestream(message):
         try: driver.get(sso_url)
         except Exception: pass 
             
-        time.sleep(2) # تقليل الانتظار
+        time.sleep(2)
         
-        bot.edit_message_text("⚡ [3/7] جاري الضغط على موافقة الحساب...", chat_id=message.chat.id, message_id=msg.message_id)
+        bot.edit_message_text("⚡ [3/7] جاري تسجيل الدخول والقفز الفوري...", chat_id=message.chat.id, message_id=msg.message_id)
+        
+        # --- السحر هنا: قفزة النينجا (تخطي الـ Dashboard بالكامل) ---
         try:
-            js_script = "var btn = document.getElementById('confirm'); if(btn) { btn.click(); return true; } return false;"
-            clicked = driver.execute_script(js_script)
-            if not clicked:
-                understand_btn = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.ID, "confirm")))
-                understand_btn.click()
+            # ننتظر ظهور زر الموافقة (I understand) ونضغطه
+            understand_btn = WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.ID, "confirm")))
+            driver.execute_script("arguments[0].click();", understand_btn)
+            
+            # قفزة فورية للـ Cloud Shell بدون انتظار!
+            driver.get(shell_url) 
         except Exception:
-            pass
+            # إذا لم يجد الزر، يقفز مباشرة للـ Cloud Shell
+            driver.get(shell_url)
 
-        time.sleep(2) 
+        bot.edit_message_text("⚡ [4/7] جاري تحميل واجهة Cloud Shell...", chat_id=message.chat.id, message_id=msg.message_id)
         
-        bot.edit_message_text("⚡ [4/7] فتح واجهة Cloud Shell...", chat_id=message.chat.id, message_id=msg.message_id)
-        try: driver.get(shell_url) 
-        except Exception: pass 
-
         bot.edit_message_text("⚡ [5/7] تخويل الصلاحيات (Authorize)...", chat_id=message.chat.id, message_id=msg.message_id)
-        time.sleep(10) # انتظار تحميل الكلاود شيل
+        time.sleep(12) # انتظار تحميل الكلاود شيل (يحتاج وقتاً ليبني نفسه في سيرفرات جوجل)
         try:
             js_auth_script = """
             var btns = document.querySelectorAll('button, span, div');
@@ -206,7 +207,7 @@ def start_livestream(message):
 
         # --- حلقة البث السريعة جداً (التيربو) ---
         while True:
-            time.sleep(1.5) # أسرع مرتين من السابق! تحديث شبه فوري.
+            time.sleep(1.5) # أسرع مرتين! تحديث شبه فوري.
             try:
                 photo = get_light_jpg_screenshot(driver)
                 bot.edit_message_media(
