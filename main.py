@@ -6,7 +6,7 @@ from io import BytesIO
 import undetected_chromedriver as uc
 from pyvirtualdisplay import Display
 from telebot.types import InputMediaPhoto
-from PIL import Image # المكتبة الجديدة لضغط الصور وتحويلها لـ JPG
+from PIL import Image
 
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -33,55 +33,54 @@ def run_dummy_server():
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# ---------------------------------------------------------
-# دالة سحرية لالتقاط الصورة، تصغيرها، وتحويلها لـ JPG خفيف جداً
-# ---------------------------------------------------------
 def get_light_jpg_screenshot(driver):
-    # التقاط الصورة كـ PNG خام من المتصفح
     png_data = driver.get_screenshot_as_png()
-    # فتحها في الذاكرة
     img = Image.open(BytesIO(png_data))
-    # تحويلها إلى نظام الألوان RGB (إجباري لصيغة JPG)
     img = img.convert('RGB')
-    
-    # تصغير أبعاد الصورة للنصف لتقليل استهلاك الرام وسرعة الإرسال
     img.thumbnail((800, 600)) 
-    
-    # حفظ الصورة في الذاكرة كـ JPG بجودة منخفضة (40%) لتكون خفيفة جداً
     output = BytesIO()
     img.save(output, format='JPEG', quality=40, optimize=True)
     output.seek(0)
     output.name = 'screen.jpg'
     return output
-# ---------------------------------------------------------
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "أهلاً بك! أرسل الأمر /live لبدء البث، وسأطلب منك الرابط 🚀")
+    bot.reply_to(message, "أهلاً بك! أرسل الأمر /live لبدء البث والأتمتة 🚀")
 
 @bot.message_handler(commands=['live'])
-def ask_for_url(message):
-    msg = bot.reply_to(message, "🔗 الرجاء إرسال الرابط الذي تريد الدخول إليه وبثه:")
-    bot.register_next_step_handler(msg, start_livestream)
+def ask_for_sso_url(message):
+    # الخطوة 1: طلب رابط تسجيل الدخول
+    msg = bot.reply_to(message, "🔗 1. الرجاء إرسال **رابط تسجيل الدخول الأول** (skills.google...):")
+    bot.register_next_step_handler(msg, ask_for_shell_url)
 
-def start_livestream(message):
-    target_url = message.text
-    
-    if not target_url.startswith("http"):
+def ask_for_shell_url(message):
+    sso_url = message.text
+    if not sso_url.startswith("http"):
+        bot.reply_to(message, "❌ الرابط غير صالح. أرسل /live للمحاولة مجدداً.")
+        return
+        
+    # الخطوة 2: طلب رابط الشيل المخصص
+    msg = bot.reply_to(message, "💻 2. ممتاز! الآن أرسل **رابط الـ Cloud Shell** الخاص بالمشروع (shell.cloud.google.com/?project=...):")
+    bot.register_next_step_handler(msg, start_livestream, sso_url)
+
+def start_livestream(message, sso_url):
+    shell_url = message.text
+    if not shell_url.startswith("http"):
         bot.reply_to(message, "❌ الرابط غير صالح. أرسل /live للمحاولة مجدداً.")
         return
 
-    msg = bot.reply_to(message, "⏳ [1/4] جاري بناء الشاشة الوهمية (Xvfb)...")
+    msg = bot.reply_to(message, "⏳ [1/5] جاري بناء الشاشة الوهمية (Xvfb)...")
     
     display = Display(visible=0, size=(1280, 720))
     display.start()
     time.sleep(2)
     
     try:
-        bot.edit_message_text("⏳ [2/4] جاري تشغيل المتصفح...", chat_id=message.chat.id, message_id=msg.message_id)
+        bot.edit_message_text("⏳ [2/5] جاري تشغيل المتصفح...", chat_id=message.chat.id, message_id=msg.message_id)
         
         options = uc.ChromeOptions()
-        options.page_load_strategy = 'eager' # تسريع التحميل لمنع التجمّد
+        options.page_load_strategy = 'eager'
         options.add_argument("--disable-site-isolation-trials")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-setuid-sandbox")
@@ -98,28 +97,26 @@ def start_livestream(message):
         )
         driver.set_page_load_timeout(30)
         
-        bot.edit_message_text("⏳ [3/4] تم تشغيل المحرك! بدء البث المباشر لمعرفة كل التفاصيل...", chat_id=message.chat.id, message_id=msg.message_id)
+        bot.edit_message_text("⏳ [3/5] تم تشغيل المحرك! بدء البث المباشر...", chat_id=message.chat.id, message_id=msg.message_id)
         
         driver.get("https://accounts.google.com")
         
-        # --- التقاط البث من اللحظة الأولى (النقطة الصفرية) ---
         time.sleep(2)
         bot.delete_message(message.chat.id, msg.message_id)
         
         photo = get_light_jpg_screenshot(driver)
         live_msg = bot.send_photo(message.chat.id, photo, caption="🔴 بث مباشر (جاري التهيئة وتجهيز المتصفح)...")
         
-        # --- الانتقال للرابط الخاص بك ---
+        # --- الدخول لرابط الموافقة ---
         try:
-            driver.get(target_url)
+            driver.get(sso_url)
         except Exception:
-            pass # نتجاهل خطأ انتهاء وقت التحميل إذا كانت الصفحة ثقيلة
+            pass 
             
         time.sleep(3)
-        # تحديث الصورة لترى أن الرابط فتح
         try:
             photo = get_light_jpg_screenshot(driver)
-            bot.edit_message_media(chat_id=message.chat.id, message_id=live_msg.message_id, media=InputMediaPhoto(photo, caption="🔴 بث مباشر (تم فتح الرابط المطلوب، جاري البحث عن الزر)..."))
+            bot.edit_message_media(chat_id=message.chat.id, message_id=live_msg.message_id, media=InputMediaPhoto(photo, caption="🔴 بث مباشر (تم فتح رابط التسجيل، جاري البحث عن الزر)..."))
         except: pass
         
         # --- الضغط على الزر ---
@@ -132,7 +129,20 @@ def start_livestream(message):
         except Exception as e:
             print("لم يتم العثور على الزر أو تم تجاوزه.")
 
-        # --- حلقة البث المباشر المستمرة (بصور خفيفة JPG) ---
+        time.sleep(3) # انتظار قصير لقبول جوجل لتسجيل الدخول
+        
+        # --- الانتقال المباشر لـ Cloud Shell المخصص ---
+        try:
+            photo = get_light_jpg_screenshot(driver)
+            bot.edit_message_media(chat_id=message.chat.id, message_id=live_msg.message_id, media=InputMediaPhoto(photo, caption="🔴 بث مباشر (تمت الموافقة! جاري فتح الـ Cloud Shell)..."))
+        except: pass
+        
+        try:
+            driver.get(shell_url) # سيتم فتح الرابط المخصص الذي أدخلته هنا
+        except Exception:
+            pass # نتجاهل خطأ انتهاء وقت التحميل إذا كان الـ Shell ثقيلاً
+
+        # --- حلقة البث المباشر المستمرة ---
         while True:
             time.sleep(3) 
             try:
@@ -140,7 +150,7 @@ def start_livestream(message):
                 bot.edit_message_media(
                     chat_id=message.chat.id,
                     message_id=live_msg.message_id,
-                    media=InputMediaPhoto(photo, caption="🔴 بث مباشر للشاشة... (يتم التحديث تلقائياً)")
+                    media=InputMediaPhoto(photo, caption="🔴 بث مباشر لـ Cloud Shell... (يتم التحديث تلقائياً)")
                 )
             except Exception as update_error:
                 if "is not modified" in str(update_error).lower():
