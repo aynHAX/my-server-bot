@@ -2,6 +2,8 @@ import telebot
 import os
 import time
 import traceback
+import urllib.parse
+import re
 from io import BytesIO
 import undetected_chromedriver as uc
 from pyvirtualdisplay import Display
@@ -46,29 +48,58 @@ def get_light_jpg_screenshot(driver):
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "أهلاً بك! أرسل الأمر /live لبدء البث والأتمتة 🚀")
+    bot.reply_to(message, "أهلاً بك! أرسل الأمر /live لبدء الأتمتة الذكية 🚀")
 
 @bot.message_handler(commands=['live'])
 def ask_for_sso_url(message):
-    # الخطوة 1: طلب رابط تسجيل الدخول
-    msg = bot.reply_to(message, "🔗 1. الرجاء إرسال **رابط تسجيل الدخول الأول** (skills.google...):")
-    bot.register_next_step_handler(msg, ask_for_shell_url)
+    msg = bot.reply_to(message, "🔗 الرجاء إرسال **رابط تسجيل الدخول** الطويل:")
+    bot.register_next_step_handler(msg, start_livestream)
 
-def ask_for_shell_url(message):
+def start_livestream(message):
     sso_url = message.text
     if not sso_url.startswith("http"):
         bot.reply_to(message, "❌ الرابط غير صالح. أرسل /live للمحاولة مجدداً.")
         return
-        
-    # الخطوة 2: طلب رابط الشيل المخصص
-    msg = bot.reply_to(message, "💻 2. ممتاز! الآن أرسل **رابط الـ Cloud Shell** الخاص بالمشروع (shell.cloud.google.com/?project=...):")
-    bot.register_next_step_handler(msg, start_livestream, sso_url)
 
-def start_livestream(message, sso_url):
-    shell_url = message.text
-    if not shell_url.startswith("http"):
-        bot.reply_to(message, "❌ الرابط غير صالح. أرسل /live للمحاولة مجدداً.")
+    # --- السحر هنا: استخراج بيانات المشروع وبناء رابط Shell تلقائياً ---
+    try:
+        parsed_url = urllib.parse.urlparse(sso_url)
+        query_params = urllib.parse.parse_qs(parsed_url.query)
+        
+        project_id = None
+        walkthrough_id = ""
+        
+        # محاولة قراءة البيانات من معامل relay المخفي في الرابط
+        if 'relay' in query_params:
+            relay_url = query_params['relay'][0]
+            relay_parsed = urllib.parse.urlparse(relay_url)
+            relay_params = urllib.parse.parse_qs(relay_parsed.query)
+            if 'project' in relay_params:
+                project_id = relay_params['project'][0]
+            if 'walkthrough_id' in relay_params:
+                walkthrough_id = relay_params['walkthrough_id'][0]
+        
+        # محاولة احتياطية قوية للبحث في الرابط بالكامل لو تغير التنسيق
+        if not project_id:
+            match = re.search(r'project(?:%3D|=)(qwiklabs-gcp-[a-zA-Z0-9-]+)', sso_url)
+            if match:
+                project_id = match.group(1)
+                
+        if not project_id:
+            bot.reply_to(message, "❌ لم أتمكن من العثور على اسم المشروع (qwiklabs-gcp-...) في الرابط. تأكد منه وحاول مجدداً.")
+            return
+        
+        # صناعة رابط الكلاود شيل النهائي بشكل ديناميكي
+        shell_url = f"https://shell.cloud.google.com/?project={project_id}&show=ide,terminal"
+        if walkthrough_id:
+            shell_url += f"&walkthrough_id={urllib.parse.quote(walkthrough_id, safe='')}"
+            
+        bot.send_message(message.chat.id, f"✅ تم اكتشاف المشروع بذكاء: `{project_id}`\n🚀 سيتم الانتقال لـ Cloud Shell تلقائياً بعد الموافقة!", parse_mode="Markdown")
+        
+    except Exception as e:
+        bot.reply_to(message, f"❌ حدث خطأ أثناء تحليل الرابط:\n{e}")
         return
+    # -------------------------------------------------------------------
 
     msg = bot.reply_to(message, "⏳ [1/5] جاري بناء الشاشة الوهمية (Xvfb)...")
     
@@ -100,23 +131,20 @@ def start_livestream(message, sso_url):
         bot.edit_message_text("⏳ [3/5] تم تشغيل المحرك! بدء البث المباشر...", chat_id=message.chat.id, message_id=msg.message_id)
         
         driver.get("https://accounts.google.com")
-        
         time.sleep(2)
         bot.delete_message(message.chat.id, msg.message_id)
         
         photo = get_light_jpg_screenshot(driver)
         live_msg = bot.send_photo(message.chat.id, photo, caption="🔴 بث مباشر (جاري التهيئة وتجهيز المتصفح)...")
         
-        # --- الدخول لرابط الموافقة ---
-        try:
-            driver.get(sso_url)
-        except Exception:
-            pass 
+        # --- الدخول لرابط الموافقة الأصلي ---
+        try: driver.get(sso_url)
+        except Exception: pass 
             
         time.sleep(3)
         try:
             photo = get_light_jpg_screenshot(driver)
-            bot.edit_message_media(chat_id=message.chat.id, message_id=live_msg.message_id, media=InputMediaPhoto(photo, caption="🔴 بث مباشر (تم فتح رابط التسجيل، جاري البحث عن الزر)..."))
+            bot.edit_message_media(chat_id=message.chat.id, message_id=live_msg.message_id, media=InputMediaPhoto(photo, caption="🔴 بث مباشر (تم فتح الرابط، جاري البحث عن الزر)..."))
         except: pass
         
         # --- الضغط على الزر ---
@@ -129,18 +157,16 @@ def start_livestream(message, sso_url):
         except Exception as e:
             print("لم يتم العثور على الزر أو تم تجاوزه.")
 
-        time.sleep(3) # انتظار قصير لقبول جوجل لتسجيل الدخول
+        time.sleep(3) 
         
-        # --- الانتقال المباشر لـ Cloud Shell المخصص ---
+        # --- الانتقال المباشر لـ Cloud Shell الذي قمنا بصناعته ---
         try:
             photo = get_light_jpg_screenshot(driver)
             bot.edit_message_media(chat_id=message.chat.id, message_id=live_msg.message_id, media=InputMediaPhoto(photo, caption="🔴 بث مباشر (تمت الموافقة! جاري فتح الـ Cloud Shell)..."))
         except: pass
         
-        try:
-            driver.get(shell_url) # سيتم فتح الرابط المخصص الذي أدخلته هنا
-        except Exception:
-            pass # نتجاهل خطأ انتهاء وقت التحميل إذا كان الـ Shell ثقيلاً
+        try: driver.get(shell_url) 
+        except Exception: pass 
 
         # --- حلقة البث المباشر المستمرة ---
         while True:
@@ -150,7 +176,7 @@ def start_livestream(message, sso_url):
                 bot.edit_message_media(
                     chat_id=message.chat.id,
                     message_id=live_msg.message_id,
-                    media=InputMediaPhoto(photo, caption="🔴 بث مباشر لـ Cloud Shell... (يتم التحديث تلقائياً)")
+                    media=InputMediaPhoto(photo, caption=f"🔴 بث مباشر لمشروع: {project_id} (يتم التحديث تلقائياً)")
                 )
             except Exception as update_error:
                 if "is not modified" in str(update_error).lower():
@@ -172,5 +198,5 @@ def start_livestream(message, sso_url):
 print("جاري تشغيل خادم الويب الوهمي لتخطي فحص Koyeb...")
 threading.Thread(target=run_dummy_server, daemon=True).start()
 
-print("البوت الاحترافي يعمل الآن ومستعد للبث المستمر بصور خفيفة...")
+print("البوت الاحترافي يعمل الآن ومستعد للبث المستمر...")
 bot.infinity_polling()
