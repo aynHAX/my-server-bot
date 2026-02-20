@@ -101,7 +101,8 @@ def start_livestream(message):
 
     msg = bot.reply_to(message, "⏳ [1/7] جاري بناء الشاشة الوهمية (Xvfb) على سيرفر Koyeb...")
     
-    display = Display(visible=0, size=(1280, 720))
+    # التعديل الأول: إجبار الشاشة الوهمية على عمق ألوان 24 بت لكي لا تظهر بيضاء
+    display = Display(visible=0, size=(1280, 720), color_depth=24)
     display.start()
     time.sleep(2)
     
@@ -118,6 +119,10 @@ def start_livestream(message):
         options.add_argument("--disable-gpu")
         options.add_argument("--disable-software-rasterizer")
         
+        # التعديل الثاني: إجبار المتصفح على أبعاد محددة لكي لا ينهار في الـ Docker
+        options.add_argument("--window-size=1280,720")
+        options.add_argument("--start-maximized")
+        
         # مسارات الكروم الخاصة ببيئة Docker على Koyeb
         driver = uc.Chrome(
             options=options, 
@@ -125,6 +130,9 @@ def start_livestream(message):
             driver_executable_path="/usr/bin/chromedriver",
             browser_executable_path="/usr/bin/chromium"
         )
+        
+        # التعديل الثالث: تأكيد الأبعاد بعد الفتح
+        driver.set_window_size(1280, 720)
         driver.set_page_load_timeout(30)
         
         bot.edit_message_text("⏳ [3/7] تم تشغيل المحرك! بدء البث المباشر...", chat_id=message.chat.id, message_id=msg.message_id)
