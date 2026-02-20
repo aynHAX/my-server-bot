@@ -17,13 +17,13 @@ from selenium.webdriver.support import expected_conditions as EC
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-# --- الخادم الوهمي لتخطي فحص Koyeb (Port 8000) ---
+# --- الخادم الوهمي لتخطي فحص Koyeb ---
 class DummyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.send_header('Content-type', 'text/plain')
         self.end_headers()
-        self.wfile.write(b"Bot is Healthy and Running on Koyeb!")
+        self.wfile.write(b"Bot is Healthy and Running FAST on Koyeb!")
     
     def log_message(self, format, *args):
         pass
@@ -37,20 +37,23 @@ def run_dummy_server():
 BOT_TOKEN = os.environ.get('BOT_TOKEN')
 bot = telebot.TeleBot(BOT_TOKEN)
 
+# --- دالة التقاط الصور التيربو (صاروخية الرفع) ---
 def get_light_jpg_screenshot(driver):
     png_data = driver.get_screenshot_as_png()
     img = Image.open(BytesIO(png_data))
     img = img.convert('RGB')
-    img.thumbnail((800, 600)) 
+    # تصغير الحجم للنصف لتسريع المعالجة والرفع
+    img.thumbnail((640, 480)) 
     output = BytesIO()
-    img.save(output, format='JPEG', quality=40, optimize=True)
+    # ضغط قاسي بنسبة 25 لتحويل الصورة لوزن الريشة
+    img.save(output, format='JPEG', quality=25, optimize=True)
     output.seek(0)
     output.name = 'screen.jpg'
     return output
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "أهلاً بك! البوت يعمل الآن بقوة على خوادم Koyeb ☁️. أرسل /live للبدء 🚀")
+    bot.reply_to(message, "أهلاً بك! البوت يعمل الآن بقوة (النسخة التيربو ⚡) على خوادم Koyeb. أرسل /live للبدء 🚀")
 
 @bot.message_handler(commands=['live'])
 def ask_for_sso_url(message):
@@ -63,7 +66,7 @@ def start_livestream(message):
         bot.reply_to(message, "❌ الرابط غير صالح. أرسل /live للمحاولة مجدداً.")
         return
 
-    # --- استخراج بيانات المشروع بذكاء ---
+    # --- استخراج بيانات المشروع ---
     try:
         parsed_url = urllib.parse.urlparse(sso_url)
         query_params = urllib.parse.parse_qs(parsed_url.query)
@@ -88,27 +91,22 @@ def start_livestream(message):
             bot.reply_to(message, "❌ لم أتمكن من العثور على اسم المشروع. تأكد من الرابط.")
             return
         
-        # صناعة رابط الكلاود شيل لفتح التيرمينال مباشرة
         shell_url = f"https://shell.cloud.google.com/?project={project_id}&show=terminal"
         if walkthrough_id:
             shell_url += f"&walkthrough_id={urllib.parse.quote(walkthrough_id, safe='')}"
             
-        bot.send_message(message.chat.id, f"✅ تم اكتشاف المشروع: `{project_id}`\n🚀 سيتم الانتقال للـ Shell تلقائياً!", parse_mode="Markdown")
+        bot.send_message(message.chat.id, f"✅ تم اكتشاف المشروع: `{project_id}`\n🚀 سيتم الانتقال للـ Shell بسرعة!", parse_mode="Markdown")
         
     except Exception as e:
         bot.reply_to(message, f"❌ حدث خطأ أثناء تحليل الرابط:\n{e}")
         return
 
-    msg = bot.reply_to(message, "⏳ [1/7] جاري بناء الشاشة الوهمية (Xvfb) على سيرفر Koyeb...")
+    msg = bot.reply_to(message, "⚡ [1/7] جاري تجهيز البيئة السريعة...")
     
-    # التعديل الأول: إجبار الشاشة الوهمية على عمق ألوان 24 بت لكي لا تظهر بيضاء
     display = Display(visible=0, size=(1280, 720), color_depth=24)
     display.start()
-    time.sleep(2)
     
     try:
-        bot.edit_message_text("⏳ [2/7] جاري تشغيل المتصفح الخفي (Incognito)...", chat_id=message.chat.id, message_id=msg.message_id)
-        
         options = uc.ChromeOptions()
         options.page_load_strategy = 'eager'
         options.add_argument("--incognito")
@@ -118,12 +116,16 @@ def start_livestream(message):
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
         options.add_argument("--disable-software-rasterizer")
-        
-        # التعديل الثاني: إجبار المتصفح على أبعاد محددة لكي لا ينهار في الـ Docker
         options.add_argument("--window-size=1280,720")
-        options.add_argument("--start-maximized")
         
-        # مسارات الكروم الخاصة ببيئة Docker على Koyeb
+        # --- أوامر التيربو الإضافية لتخفيف المتصفح ---
+        options.add_argument("--disable-extensions")
+        options.add_argument("--mute-audio")
+        options.add_argument("--disable-notifications")
+        options.add_argument("--disable-popup-blocking")
+        options.add_argument("--disable-default-apps")
+        # ----------------------------------------------
+        
         driver = uc.Chrome(
             options=options, 
             use_subprocess=True,
@@ -131,46 +133,36 @@ def start_livestream(message):
             browser_executable_path="/usr/bin/chromium"
         )
         
-        # التعديل الثالث: تأكيد الأبعاد بعد الفتح
         driver.set_window_size(1280, 720)
         driver.set_page_load_timeout(30)
         
-        bot.edit_message_text("⏳ [3/7] تم تشغيل المحرك! بدء البث المباشر...", chat_id=message.chat.id, message_id=msg.message_id)
+        bot.edit_message_text("⚡ [2/7] المحرك جاهز! بدء عملية الاختراق...", chat_id=message.chat.id, message_id=msg.message_id)
         
-        photo = get_light_jpg_screenshot(driver)
-        live_msg = bot.send_photo(message.chat.id, photo, caption="🔴 بث مباشر (جاري التهيئة)...")
+        live_msg = bot.send_photo(message.chat.id, get_light_jpg_screenshot(driver), caption="🔴 بث مباشر (التهيئة)...")
         
-        # --- الدخول لرابط الموافقة المباشر ---
         try: driver.get(sso_url)
         except Exception: pass 
             
-        time.sleep(3)
-        try:
-            photo = get_light_jpg_screenshot(driver)
-            bot.edit_message_media(chat_id=message.chat.id, message_id=live_msg.message_id, media=InputMediaPhoto(photo, caption="🔴 بث مباشر (جاري البحث عن زر الموافقة الأول)..."))
-        except: pass
+        time.sleep(2) # تقليل الانتظار
         
-        # --- الضغط على موافقة الحساب الأولى ---
-        bot.edit_message_text("⏳ [4/7] جاري الضغط على موافقة الحساب...", chat_id=message.chat.id, message_id=msg.message_id)
+        bot.edit_message_text("⚡ [3/7] جاري الضغط على موافقة الحساب...", chat_id=message.chat.id, message_id=msg.message_id)
         try:
             js_script = "var btn = document.getElementById('confirm'); if(btn) { btn.click(); return true; } return false;"
             clicked = driver.execute_script(js_script)
             if not clicked:
                 understand_btn = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((By.ID, "confirm")))
                 understand_btn.click()
-        except Exception as e:
-            print("لم يتم العثور على زر الموافقة الأول.")
+        except Exception:
+            pass
 
-        time.sleep(3) 
+        time.sleep(2) 
         
-        # --- الانتقال لـ Cloud Shell ---
-        bot.edit_message_text("⏳ [5/7] جاري فتح واجهة Cloud Shell...", chat_id=message.chat.id, message_id=msg.message_id)
+        bot.edit_message_text("⚡ [4/7] فتح واجهة Cloud Shell...", chat_id=message.chat.id, message_id=msg.message_id)
         try: driver.get(shell_url) 
         except Exception: pass 
 
-        # --- انتظار واجهة Cloud Shell والضغط على زر Authorize ---
-        bot.edit_message_text("⏳ [6/7] جاري انتظار ظهور زر التخويل (Authorize)...", chat_id=message.chat.id, message_id=msg.message_id)
-        time.sleep(12) 
+        bot.edit_message_text("⚡ [5/7] تخويل الصلاحيات (Authorize)...", chat_id=message.chat.id, message_id=msg.message_id)
+        time.sleep(10) # انتظار تحميل الكلاود شيل
         try:
             js_auth_script = """
             var btns = document.querySelectorAll('button, span, div');
@@ -184,17 +176,16 @@ def start_livestream(message):
             """
             clicked_auth = driver.execute_script(js_auth_script)
             if not clicked_auth:
-                auth_btn = WebDriverWait(driver, 15).until(
+                auth_btn = WebDriverWait(driver, 10).until(
                     EC.element_to_be_clickable((By.XPATH, "//*[contains(translate(text(), 'AUTHORIZE', 'authorize'), 'authorize')] | //button[contains(., 'Authorize')]"))
                 )
                 auth_btn.click()
-        except Exception as e:
-            print("لم يظهر زر Authorize.")
+        except Exception:
+            pass
 
-        time.sleep(4)
+        time.sleep(3)
 
-        # --- إغلاق المحرر (Editor) وترك الـ Terminal فقط ---
-        bot.edit_message_text("⏳ [7/7] جاري تنظيف الشاشة وترك الـ Terminal فقط...", chat_id=message.chat.id, message_id=msg.message_id)
+        bot.edit_message_text("⚡ [6/7] تنظيف الشاشة للمحطة (Terminal)...", chat_id=message.chat.id, message_id=msg.message_id)
         try:
             js_close_editor = """
             var btns = document.querySelectorAll('button, a');
@@ -213,15 +204,15 @@ def start_livestream(message):
             
         bot.delete_message(message.chat.id, msg.message_id)
 
-        # --- حلقة البث المباشر المستمرة ---
+        # --- حلقة البث السريعة جداً (التيربو) ---
         while True:
-            time.sleep(3) 
+            time.sleep(1.5) # أسرع مرتين من السابق! تحديث شبه فوري.
             try:
                 photo = get_light_jpg_screenshot(driver)
                 bot.edit_message_media(
                     chat_id=message.chat.id,
                     message_id=live_msg.message_id,
-                    media=InputMediaPhoto(photo, caption=f"🔴 بث مباشر للـ Terminal: {project_id}")
+                    media=InputMediaPhoto(photo, caption=f"🔴 بث مباشر ⚡: {project_id}")
                 )
             except Exception as update_error:
                 if "is not modified" in str(update_error).lower():
@@ -243,9 +234,8 @@ def start_livestream(message):
 print("جاري تشغيل خادم الويب الوهمي لتخطي فحص Koyeb...")
 threading.Thread(target=run_dummy_server, daemon=True).start()
 
-print("البوت الاحترافي يعمل الآن ومستعد للبث المستمر...")
+print("البوت يعمل بوضع التيربو ⚡...")
 
-# حماية الاتصال من الانقطاع
 while True:
     try:
         bot.polling(non_stop=True, timeout=60)
