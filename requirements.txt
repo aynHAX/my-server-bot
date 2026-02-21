@@ -1,3 +1,5 @@
 pyTelegramBotAPI==4.15.4
 selenium==4.18.1
+undetected-chromedriver==3.5.5
 PyVirtualDisplay==3.0
+selenium-stealth==1.0.6
