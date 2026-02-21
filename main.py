@@ -5,7 +5,6 @@ import threading
 import io
 import shutil
 import re
-import traceback
 from datetime import datetime
 from telebot.types import InputMediaPhoto, InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -47,10 +46,7 @@ def get_driver():
     options.add_argument('--window-size=1280,720')
     options.add_argument('--disable-features=Translate') 
     
-    # خيارات التمويه
-    options.add_argument('--disable-blink-features=AutomationControlled')
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option('useAutomationExtension', False)
+    # تم حذف الأسطر المتعارضة (excludeSwitches) لأن مكتبة uc تتكفل بالتخفي تلقائياً
     
     driver = uc.Chrome(
         options=options,
@@ -244,7 +240,7 @@ def start_stream(chat_id, url):
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "مرحباً! البوت يعمل الآن بالنسخة الكاملة (تخفي أقصى + تحديث لا يتوقف). أرسل الرابط. 🚀")
+    bot.reply_to(message, "مرحباً! البوت يعمل الآن بالنسخة الكاملة. أرسل الرابط. 🚀")
 
 @bot.message_handler(func=lambda message: message.text.startswith('https://www.skills.google/google_sso'))
 def handle_qwiklabs_url(message):
@@ -282,5 +278,5 @@ def callback_query(call):
     except Exception as e:
         pass
 
-print("البوت المتكامل يعمل الآن (تمت استعادة التحديث المستمر الإجباري بالكامل)...")
+print("البوت المتكامل يعمل الآن (تم حل مشكلة التعارض مع مكتبة التخفي)...")
 bot.polling()
