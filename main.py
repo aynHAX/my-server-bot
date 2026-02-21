@@ -7,21 +7,20 @@ import shutil
 import re
 from datetime import datetime
 from telebot.types import InputMediaPhoto, InlineKeyboardMarkup, InlineKeyboardButton
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
 
-# 🔥 السر الجديد: تشغيل شاشة وهمية لخداع جوجل بأننا متصفح حقيقي!
+# 🔥 المدفعية الثقيلة للتخفي والشاشة الوهمية
+import undetected_chromedriver as uc
+from selenium.webdriver.common.by import By
 from pyvirtualdisplay import Display
 
 TOKEN = os.getenv('BOT_TOKEN')
 if not TOKEN:
-    raise ValueError("لم يتم العثور على التوكن! تأكد من إضافة BOT_TOKEN في إعدادات Koyeb.")
+    raise ValueError("لم يتم العثور على التوكن! تأكد من إضافته في إعدادات Koyeb.")
 
 bot = telebot.TeleBot(TOKEN)
 user_sessions = {}
 
-# تشغيل الشاشة الوهمية على السيرفر بشكل دائم
+# تشغيل الشاشة الوهمية لكي يعمل المتصفح بشكل حقيقي وكامل
 try:
     display = Display(visible=0, size=(1280, 720))
     display.start()
@@ -30,13 +29,12 @@ except Exception as e:
 
 def get_driver():
     browser_path = shutil.which('google-chrome') or shutil.which('chromium') or shutil.which('chromium-browser')
-    if not browser_path:
+    driver_path = shutil.which('chromedriver') or shutil.which('chromium-driver')
+    
+    if not browser_path or not driver_path:
         raise Exception("BROWSER_MISSING")
 
-    options = Options()
-    options.page_load_strategy = 'eager' 
-    
-    # ❌ قمنا بحذف خيار --headless لكي يفتح المتصفح بشكله الحقيقي على الشاشة الوهمية
+    options = uc.ChromeOptions()
     options.add_argument('--incognito')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
@@ -44,23 +42,13 @@ def get_driver():
     options.add_argument('--window-size=1280,720')
     options.add_argument('--disable-features=Translate') 
     
-    # خيارات التمويه
-    options.add_argument('--disable-blink-features=AutomationControlled')
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option('useAutomationExtension', False)
-    options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-    
-    options.binary_location = browser_path
-    driver = webdriver.Chrome(options=options)
-    
-    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-        "source": """
-            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-            window.navigator.chrome = {runtime: {}};
-            Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
-        """
-    })
+    # 🔥 تشغيل النسخة الخفية من المتصفح (لن تكتشفه جوجل أبدًا)
+    driver = uc.Chrome(
+        options=options,
+        browser_executable_path=browser_path,
+        driver_executable_path=driver_path,
+        headless=False # نتركه False لأن الشاشة الوهمية (Xvfb) تقوم بالواجب!
+    )
     
     driver.set_page_load_timeout(45) 
     return driver
@@ -100,8 +88,7 @@ def stream_loop(chat_id):
                         btns[0].click()
                         status_msg = "تم الضغط على I understand ✔️"
                         time.sleep(2)
-                except:
-                    pass
+                except: pass
 
                 if "console.cloud.google.com" in current_url or "myaccount.google.com" in current_url:
                     project_id = session.get('project_id')
@@ -112,8 +99,7 @@ def stream_loop(chat_id):
                             driver.get(shell_url)
                             session['shell_opened'] = True
                             time.sleep(4)
-                        except:
-                            pass
+                        except: pass
             else:
                 if not session.get('authorized'):
                     try:
@@ -125,16 +111,16 @@ def stream_loop(chat_id):
                                 status_msg = "تم تخطي رسالة التوثيق (Authorize) 🛡️"
                                 time.sleep(2)
                                 break
-                    except:
-                        pass
+                    except: pass
                 
                 if session.get('authorized'):
                     status_msg = "✅ الشل جاهز للأوامر الآن"
                 elif "جاري" not in status_msg:
                     status_msg = "✅ Cloud Shell يعمل الآن (بانتظار التوثيق إن وُجد)"
-            # ---------------------------------------------------------
 
-            # أخذ الصورة وتحديثها باسم جديد لتخطي حماية تيليغرام
+            # ---------------------------------------------------------
+            
+            # أخذ الصورة بأسماء متغيرة لخداع تيليغرام
             png_data = driver.get_screenshot_as_png()
             bio = io.BytesIO(png_data)
             bio.name = f'image_{int(time.time())}.png'
@@ -167,11 +153,10 @@ def stream_loop(chat_id):
                 try:
                     driver.refresh()
                     error_count = 0
-                except:
-                    pass
+                except: pass
 
 def start_stream(chat_id, url):
-    bot.send_message(chat_id, "⚡ جاري تشغيل المتصفح كإنسان حقيقي على استضافة Koyeb...")
+    bot.send_message(chat_id, "⚡ جاري تشغيل درع التخفي الأقصى لكسر حماية جوجل...")
     
     project_match = re.search(r'(qwiklabs-gcp-[\w-]+)', url)
     project_id = project_match.group(1) if project_match else None
@@ -228,11 +213,11 @@ def start_stream(chat_id, url):
         
         threading.Thread(target=stream_loop, args=(chat_id,)).start()
     except Exception as e:
-        bot.send_message(chat_id, f"⚠️ محاولة الاتصال الأولى متعثرة، لكن البوت سيستمر في المحاولة.")
+        bot.send_message(chat_id, f"⚠️ محاولة الاتصال الأولى متعثرة، لكن البوت مستمر.")
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "مرحباً! وضع 'الشاشة الوهمية' مفعل لتخطي حماية تسجيل الدخول 🛡️. أرسل رابط Qwiklabs الآن.")
+    bot.reply_to(message, "مرحباً! البوت النهائي والخالي من المشاكل يعمل الآن 🛡️. أرسل الرابط للبدء.")
 
 @bot.message_handler(func=lambda message: message.text.startswith('https://www.skills.google/google_sso'))
 def handle_qwiklabs_url(message):
@@ -240,7 +225,7 @@ def handle_qwiklabs_url(message):
 
 @bot.message_handler(func=lambda message: message.text.startswith('http') and not message.text.startswith('https://www.skills.google/google_sso'))
 def handle_invalid_url(message):
-    bot.reply_to(message, "❌ عذراً، يجب أن يبدأ الرابط بـ:\n`https://www.skills.google/google_sso`", parse_mode="Markdown")
+    bot.reply_to(message, "❌ عذراً، الرابط يجب أن يبدأ بـ:\n`https://www.skills.google/google_sso`", parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
@@ -251,22 +236,17 @@ def callback_query(call):
             return
             
         session = user_sessions[chat_id]
-        
         if call.data == "stop_stream":
             session['running'] = False
             bot.answer_callback_query(call.id, "تم إيقاف البث.")
             bot.edit_message_caption("🛑 تم إيقاف البث.", chat_id=chat_id, message_id=session['message_id'])
-            try:
-                session['driver'].get("about:blank")
+            try: session['driver'].get("about:blank")
             except: pass
-            
         elif call.data == "refresh_page":
             bot.answer_callback_query(call.id, "جاري الإنعاش يدوياً...")
-            try:
-                session['driver'].refresh()
+            try: session['driver'].refresh()
             except: pass
-    except:
-        pass
+    except: pass
 
-print("البوت يعمل الآن بكفاءة (تم تفعيل الشاشة الوهمية Xvfb للعمل على Koyeb)...")
+print("البوت النهائي والخالي من المشاكل يعمل الآن (التخفي الأقصى + الشاشة الوهمية)...")
 bot.polling()
