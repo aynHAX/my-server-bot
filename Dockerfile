@@ -1,27 +1,21 @@
+# استخدام نسخة بايثون خفيفة
 FROM python:3.11-slim
 
-# تحديث وتثبيت المتصفح والشاشة الوهمية (Xvfb)
+# تحديث النظام وتثبيت متصفح Chromium ليتمكن البوت من استخدامه
 RUN apt-get update && apt-get install -y \
-    wget \
-    gnupg \
-    unzip \
-    xvfb \
     chromium \
     chromium-driver \
     && rm -rf /var/lib/apt/lists/*
 
-# إعداد مسار العمل
+# تحديد مجلد العمل داخل السيرفر
 WORKDIR /app
 
-# نسخ الملفات
+# نسخ ملف المتطلبات وتثبيت المكتبات
 COPY requirements.txt .
-COPY main.py .
-
-# تثبيت مكتبات بايثون
 RUN pip install --no-cache-dir -r requirements.txt
 
-# فتح البورت 8000 ليتعرف عليه Koyeb
-EXPOSE 8000
+# نسخ باقي ملفات البوت
+COPY . .
 
-# تشغيل البوت
+# أمر تشغيل البوت
 CMD ["python", "main.py"]
