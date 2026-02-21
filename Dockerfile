@@ -1,7 +1,5 @@
-# استخدام نسخة بايثون خفيفة
 FROM python:3.11-slim
 
-# تحديث النظام وتثبيت متصفح Chromium والشاشة الوهمية والخطوط
 RUN apt-get update && apt-get install -y \
     chromium \
     chromium-driver \
