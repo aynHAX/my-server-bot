@@ -5,10 +5,11 @@ import threading
 import io
 import shutil
 import re
+import traceback
 from datetime import datetime
 from telebot.types import InputMediaPhoto, InlineKeyboardMarkup, InlineKeyboardButton
 
-# 🔥 المدفعية الثقيلة للتخفي والشاشة الوهمية
+# مكتبات التخفي والشاشة الوهمية
 import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from pyvirtualdisplay import Display
@@ -20,12 +21,13 @@ if not TOKEN:
 bot = telebot.TeleBot(TOKEN)
 user_sessions = {}
 
-# تشغيل الشاشة الوهمية لكي يعمل المتصفح بشكل حقيقي وكامل
+# تشغيل الشاشة الوهمية (Xvfb) لعمل المتصفح بشكل حقيقي وتجاوز الحظر
 try:
     display = Display(visible=0, size=(1280, 720))
     display.start()
+    print("✅ تم تشغيل الشاشة الوهمية بنجاح.")
 except Exception as e:
-    print(f"تنبيه: فشل تشغيل الشاشة الوهمية: {e}")
+    print(f"⚠️ تنبيه: فشل تشغيل الشاشة الوهمية: {e}")
 
 def get_driver():
     browser_path = shutil.which('google-chrome') or shutil.which('chromium') or shutil.which('chromium-browser')
@@ -35,6 +37,9 @@ def get_driver():
         raise Exception("BROWSER_MISSING")
 
     options = uc.ChromeOptions()
+    # نظام التحميل السريع لمنع تعليق المتصفح
+    options.page_load_strategy = 'eager' 
+    
     options.add_argument('--incognito')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
@@ -42,12 +47,16 @@ def get_driver():
     options.add_argument('--window-size=1280,720')
     options.add_argument('--disable-features=Translate') 
     
-    # 🔥 تشغيل النسخة الخفية من المتصفح (لن تكتشفه جوجل أبدًا)
+    # خيارات التمويه
+    options.add_argument('--disable-blink-features=AutomationControlled')
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option('useAutomationExtension', False)
+    
     driver = uc.Chrome(
         options=options,
         browser_executable_path=browser_path,
         driver_executable_path=driver_path,
-        headless=False # نتركه False لأن الشاشة الوهمية (Xvfb) تقوم بالواجب!
+        headless=False # نتركه False لأن الشاشة الوهمية موجودة
     )
     
     driver.set_page_load_timeout(45) 
@@ -61,17 +70,21 @@ def create_control_panel():
     return markup
 
 def stream_loop(chat_id):
+    """حلقة البث المستمر التي لا تتوقف"""
     session = user_sessions[chat_id]
     driver = session['driver']
     flash_state = True 
     error_count = 0 
     
     while session['running']:
+        # وقت التحديث الثابت
         time.sleep(4) 
+        
         if not session['running']:
             break
             
         try:
+            # التبديل دائماً لأحدث نافذة
             if len(driver.window_handles) > 0:
                 driver.switch_to.window(driver.window_handles[-1])
             
@@ -79,17 +92,20 @@ def stream_loop(chat_id):
             status_msg = "جاري المراقبة والمعالجة..."
 
             # ---------------------------------------------------------
-            # 🤖 الطيار الآلي
+            # 🤖 نظام الطيار الآلي المتكامل
             # ---------------------------------------------------------
             if not session.get('shell_opened'):
+                # 1. الضغط على زر I understand
                 try:
                     btns = driver.find_elements(By.XPATH, "//*[contains(text(), 'I understand')]")
                     if btns and btns[0].is_displayed():
                         btns[0].click()
                         status_msg = "تم الضغط على I understand ✔️"
                         time.sleep(2)
-                except: pass
+                except:
+                    pass
 
+                # 2. القفز التلقائي إلى الشاشة السوداء
                 if "console.cloud.google.com" in current_url or "myaccount.google.com" in current_url:
                     project_id = session.get('project_id')
                     if project_id:
@@ -99,8 +115,10 @@ def stream_loop(chat_id):
                             driver.get(shell_url)
                             session['shell_opened'] = True
                             time.sleep(4)
-                        except: pass
+                        except:
+                            pass
             else:
+                # 3. توثيق الشل التلقائي (Authorize)
                 if not session.get('authorized'):
                     try:
                         auth_btns = driver.find_elements(By.XPATH, "//button[contains(., 'Authorize') or contains(., 'AUTHORIZE')]")
@@ -111,7 +129,8 @@ def stream_loop(chat_id):
                                 status_msg = "تم تخطي رسالة التوثيق (Authorize) 🛡️"
                                 time.sleep(2)
                                 break
-                    except: pass
+                    except:
+                        pass
                 
                 if session.get('authorized'):
                     status_msg = "✅ الشل جاهز للأوامر الآن"
@@ -119,10 +138,11 @@ def stream_loop(chat_id):
                     status_msg = "✅ Cloud Shell يعمل الآن (بانتظار التوثيق إن وُجد)"
 
             # ---------------------------------------------------------
-            
-            # أخذ الصورة بأسماء متغيرة لخداع تيليغرام
+
+            # 📸 التقاط الصورة وإجبار تيليغرام على التحديث (السر في تغيير الاسم)
             png_data = driver.get_screenshot_as_png()
             bio = io.BytesIO(png_data)
+            # إضافة Timestamp للاسم لكي لا يتوقف البث أبداً حتى لو كانت الصفحة ثابتة
             bio.name = f'image_{int(time.time())}.png'
             
             flash_state = not flash_state
@@ -139,10 +159,13 @@ def stream_loop(chat_id):
                 reply_markup=create_control_panel()
             )
             
+            # تصفير عداد الأخطاء في حال نجاح التحديث
             error_count = 0 
             
         except Exception as e:
             err_msg = str(e).lower()
+            
+            # تجاهل خطأ تيليغرام الصامت لتستمر الحلقة
             if "message is not modified" in err_msg:
                 continue
                 
@@ -150,13 +173,15 @@ def stream_loop(chat_id):
             if "too many requests" in err_msg or "retry after" in err_msg:
                 time.sleep(2)
             elif error_count >= 3: 
+                # إنعاش المتصفح تلقائياً إذا فشل 3 مرات متتالية
                 try:
                     driver.refresh()
                     error_count = 0
-                except: pass
+                except:
+                    pass
 
 def start_stream(chat_id, url):
-    bot.send_message(chat_id, "⚡ جاري تشغيل درع التخفي الأقصى لكسر حماية جوجل...")
+    bot.send_message(chat_id, "⚡ جاري تجهيز المتصفح الخفي (بث مستمر بدون توقف)...")
     
     project_match = re.search(r'(qwiklabs-gcp-[\w-]+)', url)
     project_id = project_match.group(1) if project_match else None
@@ -178,7 +203,7 @@ def start_stream(chat_id, url):
             user_sessions[chat_id]['shell_opened'] = False
             user_sessions[chat_id]['authorized'] = False
     except Exception as e:
-        bot.send_message(chat_id, f"⚠️ المتصفح واجه مشكلة في الإقلاع:\n`{str(e)}`", parse_mode="Markdown")
+        bot.send_message(chat_id, f"⚠️ خطأ في إقلاع المتصفح:\n`{str(e)}`", parse_mode="Markdown")
         return
         
     session = user_sessions[chat_id]
@@ -192,11 +217,12 @@ def start_stream(chat_id, url):
         if "timeout" not in str(e).lower():
             pass 
         
-    time.sleep(2) 
+    time.sleep(3) 
     
     try:
         if len(driver.window_handles) > 0:
             driver.switch_to.window(driver.window_handles[-1])
+            
         png_data = driver.get_screenshot_as_png()
         bio = io.BytesIO(png_data)
         bio.name = f'image_{int(time.time())}.png'
@@ -204,20 +230,21 @@ def start_stream(chat_id, url):
         msg = bot.send_photo(
             chat_id, 
             bio, 
-            caption=f"🔴 بث حي ومستمر...\n📌 الحالة: بدء المراقبة التلقائية...\n⏱ جاري الاتصال...",
+            caption=f"🔴 بث حي ومستمر...\n📌 الحالة: بدء البث...\n⏱ جاري الاتصال...",
             reply_markup=create_control_panel()
         )
         
         session['message_id'] = msg.message_id
         session['running'] = True
         
+        # بدء حلقة التحديث المستمر
         threading.Thread(target=stream_loop, args=(chat_id,)).start()
     except Exception as e:
-        bot.send_message(chat_id, f"⚠️ محاولة الاتصال الأولى متعثرة، لكن البوت مستمر.")
+        bot.send_message(chat_id, f"⚠️ المتصفح واجه صعوبة في اللقطة الأولى، سأستمر في المحاولة.")
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "مرحباً! البوت النهائي والخالي من المشاكل يعمل الآن 🛡️. أرسل الرابط للبدء.")
+    bot.reply_to(message, "مرحباً! البوت يعمل الآن بالنسخة الكاملة (تخفي أقصى + تحديث لا يتوقف). أرسل الرابط. 🚀")
 
 @bot.message_handler(func=lambda message: message.text.startswith('https://www.skills.google/google_sso'))
 def handle_qwiklabs_url(message):
@@ -225,7 +252,7 @@ def handle_qwiklabs_url(message):
 
 @bot.message_handler(func=lambda message: message.text.startswith('http') and not message.text.startswith('https://www.skills.google/google_sso'))
 def handle_invalid_url(message):
-    bot.reply_to(message, "❌ عذراً، الرابط يجب أن يبدأ بـ:\n`https://www.skills.google/google_sso`", parse_mode="Markdown")
+    bot.reply_to(message, "❌ عذراً، يجب أن يبدأ الرابط بـ:\n`https://www.skills.google/google_sso`", parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
@@ -236,17 +263,24 @@ def callback_query(call):
             return
             
         session = user_sessions[chat_id]
+        
         if call.data == "stop_stream":
             session['running'] = False
             bot.answer_callback_query(call.id, "تم إيقاف البث.")
             bot.edit_message_caption("🛑 تم إيقاف البث.", chat_id=chat_id, message_id=session['message_id'])
-            try: session['driver'].get("about:blank")
-            except: pass
+            try:
+                session['driver'].get("about:blank")
+            except:
+                pass
+                
         elif call.data == "refresh_page":
             bot.answer_callback_query(call.id, "جاري الإنعاش يدوياً...")
-            try: session['driver'].refresh()
-            except: pass
-    except: pass
+            try:
+                session['driver'].refresh()
+            except:
+                pass
+    except Exception as e:
+        pass
 
-print("البوت النهائي والخالي من المشاكل يعمل الآن (التخفي الأقصى + الشاشة الوهمية)...")
+print("البوت المتكامل يعمل الآن (تمت استعادة التحديث المستمر الإجباري بالكامل)...")
 bot.polling()
