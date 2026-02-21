@@ -1,252 +1,266 @@
 import telebot
 import os
 import time
-import traceback
-import urllib.parse
-import re
-from io import BytesIO
-import undetected_chromedriver as uc
-from pyvirtualdisplay import Display
-from telebot.types import InputMediaPhoto
-from PIL import Image
-
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import io
+import shutil
+import re
+from datetime import datetime
+from telebot.types import InputMediaPhoto, InlineKeyboardMarkup, InlineKeyboardButton
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
 
-# --- الخادم الوهمي لتخطي فحص Koyeb ---
-class DummyHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'text/plain')
-        self.end_headers()
-        self.wfile.write(b"Bot is Healthy, Fast, and Running on Koyeb!")
+TOKEN = os.getenv('BOT_TOKEN')
+if not TOKEN:
+    raise ValueError("لم يتم العثور على التوكن! تأكد من تشغيل أمر export BOT_TOKEN أولاً.")
+
+bot = telebot.TeleBot(TOKEN)
+user_sessions = {}
+
+def get_driver():
+    browser_path = shutil.which('google-chrome') or shutil.which('chromium') or shutil.which('chromium-browser')
+    if not browser_path:
+        raise Exception("BROWSER_MISSING")
+
+    options = Options()
+    options.page_load_strategy = 'eager' 
     
-    def log_message(self, format, *args):
-        pass
+    options.add_argument('--headless=new') 
+    options.add_argument('--incognito')
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
+    options.add_argument('--disable-gpu')
+    options.add_argument('--window-size=1280,720')
+    options.add_argument('--disable-features=Translate') 
+    
+    options.add_argument('--disable-blink-features=AutomationControlled')
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option('useAutomationExtension', False)
+    options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+    
+    options.binary_location = browser_path
+    driver = webdriver.Chrome(options=options)
+    
+    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+        "source": """
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            window.navigator.chrome = {runtime: {}};
+            Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+        """
+    })
+    
+    driver.set_page_load_timeout(45) 
+    return driver
 
-def run_dummy_server():
-    port = int(os.environ.get("PORT", 8000))
-    server = HTTPServer(('0.0.0.0', port), DummyHandler)
-    server.serve_forever()
-# -------------------------------------------------
+def create_control_panel():
+    markup = InlineKeyboardMarkup()
+    btn_stop = InlineKeyboardButton("⏹ إيقاف البث", callback_data="stop_stream")
+    btn_refresh = InlineKeyboardButton("🔄 تحديث الصفحة يدوياً", callback_data="refresh_page")
+    markup.row(btn_stop, btn_refresh)
+    return markup
 
-BOT_TOKEN = os.environ.get('BOT_TOKEN')
-bot = telebot.TeleBot(BOT_TOKEN)
+def stream_loop(chat_id):
+    session = user_sessions[chat_id]
+    driver = session['driver']
+    flash_state = True 
+    error_count = 0 
+    
+    while session['running']:
+        time.sleep(4) 
+        if not session['running']:
+            break
+            
+        try:
+            if len(driver.window_handles) > 0:
+                driver.switch_to.window(driver.window_handles[-1])
+            
+            current_url = driver.current_url
+            status_msg = "جاري المراقبة والمعالجة..."
 
-# --- دالة التقاط الصور التيربو ---
-def get_light_jpg_screenshot(driver):
-    png_data = driver.get_screenshot_as_png()
-    img = Image.open(BytesIO(png_data))
-    img = img.convert('RGB')
-    img.thumbnail((800, 600)) # حجم متوازن للوضوح والسرعة
-    output = BytesIO()
-    img.save(output, format='JPEG', quality=30, optimize=True)
-    output.seek(0)
-    output.name = 'screen.jpg'
-    return output
+            # ---------------------------------------------------------
+            # 🤖 الطيار الآلي
+            # ---------------------------------------------------------
+            if not session.get('shell_opened'):
+                try:
+                    btns = driver.find_elements(By.XPATH, "//*[contains(text(), 'I understand')]")
+                    if btns and btns[0].is_displayed():
+                        btns[0].click()
+                        status_msg = "تم الضغط على I understand ✔️"
+                        # تمت إزالة أمر التخطي لكي يستمر بتحديث الصورة
+                except:
+                    pass
+
+                if "console.cloud.google.com" in current_url or "myaccount.google.com" in current_url:
+                    project_id = session.get('project_id')
+                    if project_id:
+                        status_msg = f"🚀 جاري القفز إلى الشاشة السوداء..."
+                        shell_url = f"https://shell.cloud.google.com/?project={project_id}&pli=1&show=terminal"
+                        try:
+                            driver.get(shell_url)
+                            session['shell_opened'] = True
+                            time.sleep(2)
+                        except:
+                            pass
+            else:
+                if not session.get('authorized'):
+                    try:
+                        auth_btns = driver.find_elements(By.XPATH, "//button[contains(., 'Authorize') or contains(., 'AUTHORIZE')]")
+                        for btn in auth_btns:
+                            if btn.is_displayed():
+                                btn.click()
+                                session['authorized'] = True
+                                status_msg = "تم تخطي رسالة التوثيق (Authorize) 🛡️"
+                                break
+                    except:
+                        pass
+                
+                if session.get('authorized'):
+                    status_msg = "✅ الشل جاهز للأوامر الآن"
+                elif "جاري" not in status_msg:
+                    status_msg = "✅ Cloud Shell يعمل الآن (بانتظار التوثيق إن وُجد)"
+
+            # ---------------------------------------------------------
+
+            # 📸 أخذ الصورة
+            png_data = driver.get_screenshot_as_png()
+            bio = io.BytesIO(png_data)
+            
+            # 🔥 الحل السحري: إعطاء اسم جديد للصورة في كل لقطة لإجبار تيليغرام على التحديث
+            bio.name = f'image_{int(time.time())}.png'
+            
+            flash_state = not flash_state
+            live_icon = "🔴" if flash_state else "⭕"
+            now = datetime.now().strftime("%H:%M:%S")
+            
+            proj_text = f"📁 المشروع: {session.get('project_id')}" if session.get('project_id') else ""
+            caption_text = f"{live_icon} بث حي ومستمر...\n{proj_text}\n📌 الحالة: {status_msg}\n⏱ {now}"
+            
+            bot.edit_message_media(
+                media=InputMediaPhoto(bio, caption=caption_text),
+                chat_id=chat_id,
+                message_id=session['message_id'],
+                reply_markup=create_control_panel()
+            )
+            
+            error_count = 0 
+            
+        except Exception as e:
+            err_msg = str(e).lower()
+            
+            # تجاهل خطأ تيليغرام إذا اعتبر الرسالة غير معدلة لكي لا يعيد تحميل الصفحة
+            if "message is not modified" in err_msg:
+                continue
+                
+            error_count += 1
+            if "too many requests" in err_msg or "retry after" in err_msg:
+                time.sleep(2)
+            elif error_count >= 3: 
+                try:
+                    driver.refresh()
+                    error_count = 0
+                except:
+                    pass
+
+def start_stream(chat_id, url):
+    bot.send_message(chat_id, "⚡ جاري تشغيل الطيار الآلي (تحديث إجباري ومستمر مفعل)...")
+    
+    project_match = re.search(r'(qwiklabs-gcp-[\w-]+)', url)
+    project_id = project_match.group(1) if project_match else None
+    
+    try:
+        if chat_id not in user_sessions:
+            user_sessions[chat_id] = {
+                'driver': get_driver(), 
+                'running': False, 
+                'message_id': None, 
+                'url': url,
+                'project_id': project_id,
+                'shell_opened': False,
+                'authorized': False 
+            }
+        else:
+            user_sessions[chat_id]['url'] = url
+            user_sessions[chat_id]['project_id'] = project_id
+            user_sessions[chat_id]['shell_opened'] = False
+            user_sessions[chat_id]['authorized'] = False
+    except Exception as e:
+        if "BROWSER_MISSING" in str(e):
+            bot.send_message(chat_id, "⚠️ **تنبيه:** المتصفح غير مثبت.\nانسخ هذا الأمر لتثبيته:\n`sudo apt-get update && sudo apt-get install -y chromium chromium-driver`", parse_mode="Markdown")
+        return
+        
+    session = user_sessions[chat_id]
+    driver = session['driver']
+    session['running'] = False 
+    time.sleep(1) 
+    
+    try:
+        driver.get(url)
+    except Exception as e:
+        if "timeout" not in str(e).lower():
+            pass 
+        
+    time.sleep(2) 
+    
+    try:
+        if len(driver.window_handles) > 0:
+            driver.switch_to.window(driver.window_handles[-1])
+        png_data = driver.get_screenshot_as_png()
+        bio = io.BytesIO(png_data)
+        bio.name = f'image_{int(time.time())}.png'
+        
+        msg = bot.send_photo(
+            chat_id, 
+            bio, 
+            caption=f"🔴 بث حي ومستمر...\n📌 الحالة: بدء المراقبة التلقائية...\n⏱ جاري الاتصال...",
+            reply_markup=create_control_panel()
+        )
+        
+        session['message_id'] = msg.message_id
+        session['running'] = True
+        
+        threading.Thread(target=stream_loop, args=(chat_id,)).start()
+    except Exception as e:
+        bot.send_message(chat_id, f"⚠️ المتصفح واجه صعوبة في التحميل الأول، لكنه مستمر في المحاولة.")
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "أهلاً بك! البوت يعمل الآن بقوة (النسخة التيربو المستقرة ⚡) على خوادم Koyeb. أرسل /live للبدء 🚀")
+    bot.reply_to(message, "مرحباً! وضع 'الطيار الآلي' مفعل 🤖. أرسل رابط Qwiklabs وسأقوم بكل شيء.")
 
-@bot.message_handler(commands=['live'])
-def ask_for_sso_url(message):
-    msg = bot.reply_to(message, "🔗 الرجاء إرسال **رابط تسجيل الدخول** الطويل:")
-    bot.register_next_step_handler(msg, start_livestream)
+@bot.message_handler(func=lambda message: message.text.startswith('https://www.skills.google/google_sso'))
+def handle_qwiklabs_url(message):
+    threading.Thread(target=start_stream, args=(message.chat.id, message.text)).start()
 
-def start_livestream(message):
-    sso_url = message.text
-    if not sso_url.startswith("http"):
-        bot.reply_to(message, "❌ الرابط غير صالح. أرسل /live للمحاولة مجدداً.")
-        return
+@bot.message_handler(func=lambda message: message.text.startswith('http') and not message.text.startswith('https://www.skills.google/google_sso'))
+def handle_invalid_url(message):
+    bot.reply_to(message, "❌ عذراً، يجب أن يبدأ الرابط بـ:\n`https://www.skills.google/google_sso`", parse_mode="Markdown")
 
-    # --- استخراج بيانات المشروع ---
+@bot.callback_query_handler(func=lambda call: True)
+def callback_query(call):
+    chat_id = call.message.chat.id
     try:
-        parsed_url = urllib.parse.urlparse(sso_url)
-        query_params = urllib.parse.parse_qs(parsed_url.query)
-        project_id = None
-        walkthrough_id = ""
-        
-        if 'relay' in query_params:
-            relay_url = query_params['relay'][0]
-            relay_parsed = urllib.parse.urlparse(relay_url)
-            relay_params = urllib.parse.parse_qs(relay_parsed.query)
-            if 'project' in relay_params:
-                project_id = relay_params['project'][0]
-            if 'walkthrough_id' in relay_params:
-                walkthrough_id = relay_params['walkthrough_id'][0]
-        
-        if not project_id:
-            match = re.search(r'project(?:%3D|=)(qwiklabs-gcp-[a-zA-Z0-9-]+)', sso_url)
-            if match:
-                project_id = match.group(1)
-                
-        if not project_id:
-            bot.reply_to(message, "❌ لم أتمكن من العثور على اسم المشروع. تأكد من الرابط.")
+        if chat_id not in user_sessions:
+            bot.answer_callback_query(call.id, "لا توجد جلسة نشطة.")
             return
-        
-        shell_url = f"https://shell.cloud.google.com/?project={project_id}&show=terminal"
-        if walkthrough_id:
-            shell_url += f"&walkthrough_id={urllib.parse.quote(walkthrough_id, safe='')}"
             
-        bot.send_message(message.chat.id, f"✅ تم اكتشاف المشروع: `{project_id}`\n🚀 سيتم الانتقال للـ Shell بسرعة!", parse_mode="Markdown")
+        session = user_sessions[chat_id]
         
-    except Exception as e:
-        bot.reply_to(message, f"❌ حدث خطأ أثناء تحليل الرابط:\n{e}")
-        return
-
-    msg = bot.reply_to(message, "⚡ [1/7] جاري تجهيز البيئة السريعة...")
-    
-    display = Display(visible=0, size=(1280, 720), color_depth=24)
-    display.start()
-    
-    try:
-        options = uc.ChromeOptions()
-        options.page_load_strategy = 'eager'
-        options.add_argument("--incognito")
-        options.add_argument("--disable-site-isolation-trials")
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-setuid-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--disable-gpu")
-        options.add_argument("--disable-software-rasterizer")
-        options.add_argument("--window-size=1280,720")
-        
-        options.add_argument("--disable-extensions")
-        options.add_argument("--mute-audio")
-        options.add_argument("--disable-notifications")
-        options.add_argument("--disable-popup-blocking")
-        options.add_argument("--disable-default-apps")
-        
-        driver = uc.Chrome(
-            options=options, 
-            use_subprocess=True,
-            driver_executable_path="/usr/bin/chromedriver",
-            browser_executable_path="/usr/bin/chromium"
-        )
-        
-        driver.set_window_size(1280, 720)
-        driver.set_page_load_timeout(45) # مهلة أطول لتجنب انهيار Koyeb
-        
-        bot.edit_message_text("⚡ [2/7] المحرك جاهز! بدء عملية الاختراق...", chat_id=message.chat.id, message_id=msg.message_id)
-        
-        live_msg = bot.send_photo(message.chat.id, get_light_jpg_screenshot(driver), caption="🔴 بث مباشر (التهيئة)...")
-        
-        try: driver.get(sso_url)
-        except Exception: pass 
-            
-        time.sleep(2)
-        
-        bot.edit_message_text("⚡ [3/7] جاري تسجيل الدخول والقفز الفوري...", chat_id=message.chat.id, message_id=msg.message_id)
-        
-        # --- تحديث الصورة لنرى صفحة الموافقة ---
-        try:
-            bot.edit_message_media(chat_id=message.chat.id, message_id=live_msg.message_id, media=InputMediaPhoto(get_light_jpg_screenshot(driver), caption="🔴 بث مباشر (مرحلة الموافقة)..."))
-        except: pass
-
-        # --- السحر هنا: قفزة النينجا ---
-        try:
-            understand_btn = WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.ID, "confirm")))
-            driver.execute_script("arguments[0].click();", understand_btn)
-            driver.get(shell_url) 
-        except Exception:
-            driver.get(shell_url)
-
-        bot.edit_message_text("⚡ [4/7] جاري تحميل واجهة Cloud Shell...", chat_id=message.chat.id, message_id=msg.message_id)
-        
-        bot.edit_message_text("⚡ [5/7] تخويل الصلاحيات (Authorize)...", chat_id=message.chat.id, message_id=msg.message_id)
-        
-        # --- تحديث الصورة أثناء تحميل التيرمينال لكي لا تظن أنه معلق ---
-        for _ in range(4): # 4 محاولات * 3 ثواني = 12 ثانية انتظار
-            time.sleep(3)
+        if call.data == "stop_stream":
+            session['running'] = False
+            bot.answer_callback_query(call.id, "تم إيقاف البث.")
+            bot.edit_message_caption("🛑 تم إيقاف البث.", chat_id=chat_id, message_id=session['message_id'])
             try:
-                bot.edit_message_media(chat_id=message.chat.id, message_id=live_msg.message_id, media=InputMediaPhoto(get_light_jpg_screenshot(driver), caption="🔴 بث مباشر (جاري تحميل الـ Cloud Shell)..."))
+                session['driver'].get("about:blank")
             except: pass
-
-        try:
-            js_auth_script = """
-            var btns = document.querySelectorAll('button, span, div');
-            for(var i=0; i<btns.length; i++){
-                if(btns[i].innerText && btns[i].innerText.trim().toLowerCase() === 'authorize'){
-                    btns[i].click();
-                    return true;
-                }
-            }
-            return false;
-            """
-            clicked_auth = driver.execute_script(js_auth_script)
-            if not clicked_auth:
-                auth_btn = WebDriverWait(driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH, "//*[contains(translate(text(), 'AUTHORIZE', 'authorize'), 'authorize')] | //button[contains(., 'Authorize')]"))
-                )
-                auth_btn.click()
-        except Exception:
-            pass
-
-        time.sleep(3)
-
-        bot.edit_message_text("⚡ [6/7] تنظيف الشاشة للمحطة (Terminal)...", chat_id=message.chat.id, message_id=msg.message_id)
-        try:
-            js_close_editor = """
-            var btns = document.querySelectorAll('button, a');
-            for(var i=0; i<btns.length; i++){
-                var title = btns[i].getAttribute('title') || btns[i].getAttribute('aria-label') || '';
-                if(title.toLowerCase().includes('close editor') || title.toLowerCase().includes('toggle editor')){
-                    btns[i].click();
-                    return true;
-                }
-            }
-            return false;
-            """
-            driver.execute_script(js_close_editor)
-        except Exception:
-            pass
             
-        bot.delete_message(message.chat.id, msg.message_id)
-
-        # --- حلقة البث المستقرة (السرعة القصوى الآمنة لتيليغرام) ---
-        while True:
-            time.sleep(3) # 3 ثواني هو الوقت المثالي لمنع الحظر
+        elif call.data == "refresh_page":
+            bot.answer_callback_query(call.id, "جاري الإنعاش يدوياً...")
             try:
-                photo = get_light_jpg_screenshot(driver)
-                bot.edit_message_media(
-                    chat_id=message.chat.id,
-                    message_id=live_msg.message_id,
-                    media=InputMediaPhoto(photo, caption=f"🔴 بث مباشر ⚡: {project_id}")
-                )
-            except Exception as update_error:
-                error_msg = str(update_error).lower()
-                if "is not modified" in error_msg:
-                    continue # الصورة لم تتغير، لا بأس
-                elif "too many requests" in error_msg or "flood" in error_msg:
-                    print("⚠️ تيليغرام غاضب من السرعة، استراحة 5 ثوانٍ...")
-                    time.sleep(5) # تهدئة اللعب لتجنب الحظر
-                else:
-                    print(f"⚠️ خطأ أثناء التحديث المباشر: {update_error}")
-            
-    except Exception as e:
-        error_details = traceback.format_exc()
-        bot.send_message(message.chat.id, f"❌ حدث خطأ داخلي:\n{e}\n\nالتفاصيل:\n{error_details[-800:]}")
-    finally:
-        if 'driver' in locals() and driver is not None:
-            try: driver.quit()
+                session['driver'].refresh()
             except: pass
-        if 'display' in locals():
-            try: display.stop()
-            except: pass
+    except:
+        pass
 
-print("جاري تشغيل خادم الويب الوهمي لتخطي فحص Koyeb...")
-threading.Thread(target=run_dummy_server, daemon=True).start()
-
-print("البوت يعمل بوضع التيربو المستقر ⚡...")
-
-while True:
-    try:
-        bot.polling(non_stop=True, timeout=60)
-    except Exception as e:
-        print(f"⚠️ انقطع الاتصال، جاري إعادة المحاولة... ({e})")
-        time.sleep(5)
+print("البوت يعمل الآن (التحديث الإجباري للصورة الثابتة مفعل بنجاح)...")
+bot.polling()
