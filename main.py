@@ -11,12 +11,22 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 
+# 🔥 السر الجديد: تشغيل شاشة وهمية لخداع جوجل بأننا متصفح حقيقي!
+from pyvirtualdisplay import Display
+
 TOKEN = os.getenv('BOT_TOKEN')
 if not TOKEN:
-    raise ValueError("لم يتم العثور على التوكن! تأكد من تشغيل أمر export BOT_TOKEN أولاً.")
+    raise ValueError("لم يتم العثور على التوكن! تأكد من إضافة BOT_TOKEN في إعدادات Koyeb.")
 
 bot = telebot.TeleBot(TOKEN)
 user_sessions = {}
+
+# تشغيل الشاشة الوهمية على السيرفر بشكل دائم
+try:
+    display = Display(visible=0, size=(1280, 720))
+    display.start()
+except Exception as e:
+    print(f"تنبيه: فشل تشغيل الشاشة الوهمية: {e}")
 
 def get_driver():
     browser_path = shutil.which('google-chrome') or shutil.which('chromium') or shutil.which('chromium-browser')
@@ -26,7 +36,7 @@ def get_driver():
     options = Options()
     options.page_load_strategy = 'eager' 
     
-    options.add_argument('--headless=new') 
+    # ❌ قمنا بحذف خيار --headless لكي يفتح المتصفح بشكله الحقيقي على الشاشة الوهمية
     options.add_argument('--incognito')
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
@@ -34,6 +44,7 @@ def get_driver():
     options.add_argument('--window-size=1280,720')
     options.add_argument('--disable-features=Translate') 
     
+    # خيارات التمويه
     options.add_argument('--disable-blink-features=AutomationControlled')
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option('useAutomationExtension', False)
@@ -88,7 +99,7 @@ def stream_loop(chat_id):
                     if btns and btns[0].is_displayed():
                         btns[0].click()
                         status_msg = "تم الضغط على I understand ✔️"
-                        # تمت إزالة أمر التخطي لكي يستمر بتحديث الصورة
+                        time.sleep(2)
                 except:
                     pass
 
@@ -100,7 +111,7 @@ def stream_loop(chat_id):
                         try:
                             driver.get(shell_url)
                             session['shell_opened'] = True
-                            time.sleep(2)
+                            time.sleep(4)
                         except:
                             pass
             else:
@@ -112,6 +123,7 @@ def stream_loop(chat_id):
                                 btn.click()
                                 session['authorized'] = True
                                 status_msg = "تم تخطي رسالة التوثيق (Authorize) 🛡️"
+                                time.sleep(2)
                                 break
                     except:
                         pass
@@ -120,14 +132,11 @@ def stream_loop(chat_id):
                     status_msg = "✅ الشل جاهز للأوامر الآن"
                 elif "جاري" not in status_msg:
                     status_msg = "✅ Cloud Shell يعمل الآن (بانتظار التوثيق إن وُجد)"
-
             # ---------------------------------------------------------
 
-            # 📸 أخذ الصورة
+            # أخذ الصورة وتحديثها باسم جديد لتخطي حماية تيليغرام
             png_data = driver.get_screenshot_as_png()
             bio = io.BytesIO(png_data)
-            
-            # 🔥 الحل السحري: إعطاء اسم جديد للصورة في كل لقطة لإجبار تيليغرام على التحديث
             bio.name = f'image_{int(time.time())}.png'
             
             flash_state = not flash_state
@@ -148,8 +157,6 @@ def stream_loop(chat_id):
             
         except Exception as e:
             err_msg = str(e).lower()
-            
-            # تجاهل خطأ تيليغرام إذا اعتبر الرسالة غير معدلة لكي لا يعيد تحميل الصفحة
             if "message is not modified" in err_msg:
                 continue
                 
@@ -164,7 +171,7 @@ def stream_loop(chat_id):
                     pass
 
 def start_stream(chat_id, url):
-    bot.send_message(chat_id, "⚡ جاري تشغيل الطيار الآلي (تحديث إجباري ومستمر مفعل)...")
+    bot.send_message(chat_id, "⚡ جاري تشغيل المتصفح كإنسان حقيقي على استضافة Koyeb...")
     
     project_match = re.search(r'(qwiklabs-gcp-[\w-]+)', url)
     project_id = project_match.group(1) if project_match else None
@@ -186,8 +193,7 @@ def start_stream(chat_id, url):
             user_sessions[chat_id]['shell_opened'] = False
             user_sessions[chat_id]['authorized'] = False
     except Exception as e:
-        if "BROWSER_MISSING" in str(e):
-            bot.send_message(chat_id, "⚠️ **تنبيه:** المتصفح غير مثبت.\nانسخ هذا الأمر لتثبيته:\n`sudo apt-get update && sudo apt-get install -y chromium chromium-driver`", parse_mode="Markdown")
+        bot.send_message(chat_id, f"⚠️ المتصفح واجه مشكلة في الإقلاع:\n`{str(e)}`", parse_mode="Markdown")
         return
         
     session = user_sessions[chat_id]
@@ -222,11 +228,11 @@ def start_stream(chat_id, url):
         
         threading.Thread(target=stream_loop, args=(chat_id,)).start()
     except Exception as e:
-        bot.send_message(chat_id, f"⚠️ المتصفح واجه صعوبة في التحميل الأول، لكنه مستمر في المحاولة.")
+        bot.send_message(chat_id, f"⚠️ محاولة الاتصال الأولى متعثرة، لكن البوت سيستمر في المحاولة.")
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "مرحباً! وضع 'الطيار الآلي' مفعل 🤖. أرسل رابط Qwiklabs وسأقوم بكل شيء.")
+    bot.reply_to(message, "مرحباً! وضع 'الشاشة الوهمية' مفعل لتخطي حماية تسجيل الدخول 🛡️. أرسل رابط Qwiklabs الآن.")
 
 @bot.message_handler(func=lambda message: message.text.startswith('https://www.skills.google/google_sso'))
 def handle_qwiklabs_url(message):
@@ -262,5 +268,5 @@ def callback_query(call):
     except:
         pass
 
-print("البوت يعمل الآن (التحديث الإجباري للصورة الثابتة مفعل بنجاح)...")
+print("البوت يعمل الآن بكفاءة (تم تفعيل الشاشة الوهمية Xvfb للعمل على Koyeb)...")
 bot.polling()
