@@ -62,7 +62,7 @@ except:
 
 
 # ─────────────────────────────────────────────
-# 🔍 البحث عن المتصفح
+# 🔍 أدوات مساعدة
 # ─────────────────────────────────────────────
 def find_path(names, extras=None):
     for n in names:
@@ -74,7 +74,6 @@ def find_path(names, extras=None):
             return p
     return None
 
-
 def get_browser_version(path):
     try:
         r = subprocess.run([path, '--version'], capture_output=True, text=True, timeout=5)
@@ -85,7 +84,7 @@ def get_browser_version(path):
 
 
 # ─────────────────────────────────────────────
-# 🔧 تصحيح chromedriver
+# 🔧 تصحيح chromedriver (إزالة cdc_)
 # ─────────────────────────────────────────────
 def patch_chromedriver(original_path):
     patched = '/tmp/chromedriver_patched'
@@ -122,6 +121,11 @@ Object.defineProperty(navigator,'maxTouchPoints',{get:()=>0});
 window.chrome=window.chrome||{};
 window.chrome.runtime={onMessage:{addListener:function(){}},sendMessage:function(){},
 connect:function(){return{onMessage:{addListener:function(){}},postMessage:function(){}};}};
+window.chrome.loadTimes=function(){return{commitLoadTime:Date.now()/1000,
+connectionInfo:'http/1.1',finishLoadTime:Date.now()/1000,navigationType:'Other',
+requestTime:Date.now()/1000-0.16,startLoadTime:Date.now()/1000}};
+window.chrome.csi=function(){return{onloadT:Date.now(),pageT:Date.now()/1000,
+startE:Date.now(),tran:15}};
 if(navigator.permissions){var o=navigator.permissions.query;
 navigator.permissions.query=function(p){if(p.name==='notifications')
 return Promise.resolve({state:'prompt'});return o.call(navigator.permissions,p);};}
@@ -137,7 +141,7 @@ for(var p in window){if(/^cdc_/.test(p)){try{delete window[p]}catch(e){}}}
 
 
 # ─────────────────────────────────────────────
-# 🌐 إنشاء المتصفح (الإصلاح الأول: user-data-dir)
+# 🌐 إنشاء المتصفح (وضع متخفي incognito)
 # ─────────────────────────────────────────────
 def get_driver():
     browser = find_path(['chromium', 'chromium-browser'],
@@ -154,27 +158,15 @@ def get_driver():
     version = get_browser_version(browser)
     ua = f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{version}.0.0.0 Safari/537.36"
 
-    # ═══════════════════════════════════════
-    # ✅ الإصلاح #1: ملف شخصي مستمر (ليس خفي!)
-    # ═══════════════════════════════════════
-    profile_dir = '/tmp/chrome-profile'
-    os.makedirs(profile_dir, exist_ok=True)
-
-    # تنظيف أقفال من جلسة سابقة
-    for lock in ['SingletonLock', 'SingletonSocket', 'SingletonCookie']:
-        p = os.path.join(profile_dir, lock)
-        if os.path.exists(p):
-            try: os.remove(p)
-            except: pass
-
     options = Options()
     options.binary_location = browser
 
-    # ✅ ملف شخصي مستمر = وضع عادي (ليس خفي!)
-    options.add_argument(f'--user-data-dir={profile_dir}')
-    options.add_argument('--profile-directory=Default')
+    # ═══════════════════════════════════════
+    # 🕶️ الوضع المتخفي
+    # ═══════════════════════════════════════
+    options.add_argument('--incognito')
 
-    # 🛡️ تخفي
+    # 🛡️ تخفي ضد الكشف
     options.add_argument('--disable-blink-features=AutomationControlled')
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option('useAutomationExtension', False)
@@ -202,22 +194,24 @@ def get_driver():
     options.add_argument('--disable-domain-reliability')
     options.add_argument('--disable-sync')
 
-    # ⚠️ لا نضيف --incognito أبداً!
-    # ⚠️ لا نضيف --single-process (يسبب مشاكل مع البروفايل)
-
     options.page_load_strategy = 'eager'
+
+    print("🚀 إنشاء المتصفح (incognito + chromedriver مُصحَّح)...")
 
     service = Service(executable_path=patched_drv)
     driver = webdriver.Chrome(service=service, options=options)
 
+    # حقن التخفي
     try:
         driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {'source': STEALTH_JS})
+        print("🛡️ Stealth JS ✓")
     except: pass
 
     try:
         driver.execute_cdp_cmd('Network.setUserAgentOverride', {
             "userAgent": ua, "platform": "Win32", "acceptLanguage": "en-US,en;q=0.9"
         })
+        print("🛡️ UA ✓")
     except: pass
 
     driver.set_page_load_timeout(25)
@@ -229,7 +223,7 @@ def get_driver():
         print(f"🔍 webdriver={wd} {'✅' if not wd else '❌'}")
     except: pass
 
-    print("✅ المتصفح جاهز (وضع عادي + بروفايل مستمر)")
+    print("✅ المتصفح جاهز (وضع متخفي incognito)")
     return driver
 
 
@@ -272,15 +266,9 @@ def panel():
 
 
 # ─────────────────────────────────────────────
-# 🤖 الإصلاح #2: التعامل مع جميع صفحات Google
+# 🤖 التعامل مع جميع صفحات Google
 # ─────────────────────────────────────────────
 def handle_google_pages(driver, session):
-    """
-    يتعامل مع كل الصفحات التي تظهر أثناء تسجيل الدخول:
-    1. Verify it's you → ضغط Continue
-    2. I understand → ضغط
-    3. Couldn't sign you in → إعادة محاولة
-    """
     status = "مراقبة..."
 
     try:
@@ -288,33 +276,30 @@ def handle_google_pages(driver, session):
     except:
         return status
 
-    # ─── صفحة "Verify it's you" → ضغط Continue ───
-    if "Verify it" in body_text or "verify it" in body_text.lower():
+    # ─── Verify it's you → Continue ───
+    if "verify it" in body_text.lower():
         try:
-            # البحث عن زر Continue
-            continue_btns = driver.find_elements(By.XPATH,
+            btns = driver.find_elements(By.XPATH,
                 "//button[contains(., 'Continue')] | "
                 "//span[contains(., 'Continue')]/ancestor::button | "
                 "//div[contains(., 'Continue')]/ancestor::button | "
                 "//input[@value='Continue'] | "
-                "//button[@id='continue'] | "
                 "//div[@role='button'][contains(., 'Continue')]"
             )
-            for btn in continue_btns:
+            for btn in btns:
                 if btn.is_displayed():
                     time.sleep(random.uniform(0.5, 1.5))
                     btn.click()
-                    status = "✅ تم الضغط على Continue!"
-                    print(f"🤖 ضغط Continue في صفحة Verify")
+                    status = "✅ ضغط Continue (Verify)"
+                    print("🤖 ضغط Continue")
                     time.sleep(3)
                     return status
         except Exception as e:
-            print(f"⚠️ فشل ضغط Continue: {e}")
-
-        status = "🔐 صفحة التحقق (Verify) - جاري الضغط..."
+            print(f"⚠️ Continue: {e}")
+        status = "🔐 Verify - جاري الضغط..."
         return status
 
-    # ─── صفحة "I understand" ───
+    # ─── I understand ───
     if "I understand" in body_text:
         try:
             btns = driver.find_elements(By.XPATH, "//*[contains(text(), 'I understand')]")
@@ -322,68 +307,60 @@ def handle_google_pages(driver, session):
                 if btn.is_displayed():
                     time.sleep(random.uniform(0.5, 1.0))
                     btn.click()
-                    status = "✅ تم الضغط على I understand"
-                    print("🤖 ضغط I understand")
+                    status = "✅ I understand"
                     time.sleep(2)
                     return status
-        except:
-            pass
+        except: pass
 
-    # ─── صفحة "Couldn't sign you in" → إعادة المحاولة ───
+    # ─── Couldn't sign you in ───
     if "couldn't sign you in" in body_text.lower():
-        status = "⚠️ Google رفض - إعادة محاولة..."
+        status = "⚠️ رفض - إعادة محاولة..."
         try:
             driver.delete_all_cookies()
             time.sleep(1)
             driver.get(session.get('url', 'about:blank'))
             time.sleep(5)
-        except:
-            pass
+        except: pass
         return status
 
-    # ─── صفحة "Accept" / "I agree" (كوكيز Google) ───
-    if "Before you continue" in body_text or "I agree" in body_text:
+    # ─── Accept / I agree ───
+    if "before you continue" in body_text.lower() or "I agree" in body_text:
         try:
-            agree_btns = driver.find_elements(By.XPATH,
+            btns = driver.find_elements(By.XPATH,
                 "//button[contains(., 'I agree')] | "
                 "//button[contains(., 'Accept all')] | "
                 "//button[contains(., 'Accept')]"
             )
-            for btn in agree_btns:
+            for btn in btns:
                 if btn.is_displayed():
                     btn.click()
-                    status = "✅ تم قبول الشروط"
+                    status = "✅ قبول الشروط"
                     time.sleep(2)
                     return status
-        except:
-            pass
+        except: pass
 
-    # ─── صفحة Authorize (Cloud Shell) ───
-    if "Authorize" in body_text or "AUTHORIZE" in body_text:
+    # ─── Authorize ───
+    if "authorize" in body_text.lower():
         try:
-            auth_btns = driver.find_elements(By.XPATH,
+            btns = driver.find_elements(By.XPATH,
                 "//button[contains(., 'Authorize')] | "
                 "//button[contains(., 'AUTHORIZE')]"
             )
-            for btn in auth_btns:
+            for btn in btns:
                 if btn.is_displayed():
                     btn.click()
                     session['auth'] = True
-                    status = "✅ تم التوثيق (Authorize)"
+                    status = "✅ Authorize"
                     time.sleep(2)
                     return status
-        except:
-            pass
+        except: pass
 
-    # ─── التعرف على الصفحة الحالية ───
+    # ─── التعرف على الصفحة ───
     url = driver.current_url
-    if "console.cloud.google.com" in url:
-        status = "📊 في Google Cloud Console"
-    elif "shell.cloud.google.com" in url:
-        if session.get('auth'):
-            status = "✅ Cloud Shell جاهز!"
-        else:
-            status = "✅ Cloud Shell يعمل"
+    if "shell.cloud.google.com" in url:
+        status = "✅ Cloud Shell جاهز!" if session.get('auth') else "✅ Cloud Shell يعمل"
+    elif "console.cloud.google.com" in url:
+        status = "📊 Cloud Console"
     elif "myaccount.google.com" in url:
         status = "👤 صفحة الحساب"
     elif "accounts.google.com" in url:
@@ -420,14 +397,11 @@ def stream_loop(chat_id, gen):
             if handles:
                 driver.switch_to.window(handles[-1])
 
-            url = driver.current_url
-
-            # ═══════════════════════════════════════
-            # ✅ الإصلاح #2: معالجة كل صفحات Google
-            # ═══════════════════════════════════════
+            # معالجة صفحات Google
             status = handle_google_pages(driver, session)
 
-            # القفز للشل إذا وصلنا Console
+            # القفز للشل
+            url = driver.current_url
             if not session.get('shell_opened'):
                 if "console.cloud.google.com" in url or "myaccount.google.com" in url:
                     pid = session.get('project_id')
@@ -437,8 +411,7 @@ def stream_loop(chat_id, gen):
                             driver.get(f"https://shell.cloud.google.com/?project={pid}&pli=1&show=terminal")
                             session['shell_opened'] = True
                             time.sleep(5)
-                        except:
-                            pass
+                        except: pass
 
             # 📸 لقطة
             png = driver.get_screenshot_as_png()
@@ -472,7 +445,7 @@ def stream_loop(chat_id, gen):
             if "too many requests" in em or "retry after" in em:
                 w = re.search(r'retry after (\d+)', em)
                 time.sleep(int(w.group(1)) if w else 5)
-            elif any(k in em for k in ['session', 'disconnected', 'crashed', 'not reachable']):
+            elif any(k in em for k in ['session','disconnected','crashed','not reachable']):
                 drv_err += 1
                 if drv_err >= 3:
                     try: bot.send_message(chat_id, "⚠️ إعادة تشغيل...")
@@ -514,7 +487,7 @@ def start_stream(chat_id, url):
             old['gen'] = old.get('gen', 0) + 1
             old_drv = old.get('driver')
 
-    bot.send_message(chat_id, "⚡ جاري التجهيز (وضع عادي + بروفايل مستمر)...")
+    bot.send_message(chat_id, "⚡ جاري التجهيز (وضع متخفي incognito)...")
 
     if old_drv:
         safe_quit(old_drv)
@@ -525,7 +498,7 @@ def start_stream(chat_id, url):
 
     try:
         driver = get_driver()
-        bot.send_message(chat_id, "✅ المتصفح جاهز (وضع عادي)")
+        bot.send_message(chat_id, "✅ المتصفح جاهز (incognito 🕶️)")
     except Exception as e:
         bot.send_message(chat_id, f"❌ فشل:\n`{str(e)[:300]}`", parse_mode="Markdown")
         return
@@ -564,7 +537,7 @@ def start_stream(chat_id, url):
 
         msg = bot.send_photo(
             chat_id, bio,
-            caption="🔴 بث مباشر\n📌 بدء...",
+            caption="🔴 بث مباشر (incognito 🕶️)\n📌 بدء...",
             reply_markup=panel()
         )
 
@@ -575,12 +548,12 @@ def start_stream(chat_id, url):
         t.start()
 
         bot.send_message(chat_id,
-            "✅ البث يعمل!\n"
-            "🤖 الطيار الآلي سيتعامل مع:\n"
-            "  • Verify it's you → Continue\n"
+            "✅ البث يعمل! (incognito 🕶️)\n"
+            "🤖 الطيار الآلي:\n"
+            "  • Verify → Continue\n"
             "  • I understand → ضغط\n"
             "  • Authorize → ضغط\n"
-            "  • Couldn't sign → إعادة محاولة"
+            "  • رفض → إعادة محاولة"
         )
 
     except Exception as e:
@@ -595,6 +568,7 @@ def start_stream(chat_id, url):
 def cmd_start(message):
     bot.reply_to(message,
         "🚀 مرحباً!\n"
+        "🕶️ الوضع المتخفي (incognito)\n\n"
         "أرسل رابط يبدأ بـ:\n"
         "`https://www.skills.google/google_sso`",
         parse_mode="Markdown"
@@ -641,7 +615,7 @@ def on_cb(call):
 # ─────────────────────────────────────────────
 if __name__ == '__main__':
     print("=" * 45)
-    print("✅ وضع عادي + بروفايل مستمر + طيار آلي")
+    print("🕶️ وضع متخفي incognito + تخفي كامل")
     print("=" * 45)
     threading.Thread(target=start_health_server, daemon=True).start()
 
