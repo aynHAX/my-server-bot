@@ -1,6 +1,5 @@
 FROM python:3.11-slim
 
-# ✅ تثبيت Google Chrome الحقيقي + جميع المكتبات اللازمة
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg2 \
@@ -33,7 +32,6 @@ RUN apt-get update && apt-get install -y \
     && apt-get install -y google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
 
-# ✅ إنشاء مستخدم غير root (يقلل الحاجة لـ --no-sandbox)
 RUN groupadd -r botuser && useradd -r -g botuser -d /home/botuser -m -s /bin/bash botuser
 
 WORKDIR /app
@@ -43,10 +41,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# ✅ إنشاء مجلد البروفايل المستمر مع الصلاحيات الصحيحة
 RUN mkdir -p /home/botuser/chrome-profile \
     && chown -R botuser:botuser /home/botuser /app
 
 USER botuser
+
+# ✅ فتح البورت 8000 لـ Koyeb Health Check
+EXPOSE 8000
 
 CMD ["python", "main.py"]
