@@ -7,6 +7,7 @@ import re
 import random
 import shutil
 import gc
+import subprocess
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telebot.types import InputMediaPhoto, InlineKeyboardMarkup, InlineKeyboardButton
@@ -25,8 +26,9 @@ bot = telebot.TeleBot(TOKEN)
 user_sessions = {}
 sessions_lock = threading.Lock()
 
+
 # ─────────────────────────────────────────────
-# 🌐 Health Check (بدون Flask - خفيف)
+# 🌐 Health Check
 # ─────────────────────────────────────────────
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -35,82 +37,35 @@ class HealthHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"OK")
 
-    def log_message(self, format, *args):
+    def log_message(self, *args):
         pass
 
 
 def start_health_server():
     port = int(os.getenv('PORT', 8000))
-    server = HTTPServer(('0.0.0.0', port), HealthHandler)
-    print(f"🌐 Health Check: port {port}")
-    server.serve_forever()
+    HTTPServer(('0.0.0.0', port), HealthHandler).serve_forever()
 
 
 # ─────────────────────────────────────────────
-# 🖥️ شاشة وهمية خفيفة (بدل headless)
+# 🖥️ Xvfb خفيف
 # ─────────────────────────────────────────────
 display = None
 try:
-    # ✅ 800x600 + 8bit = ~10MB RAM فقط (بدل 1920x1080 24bit = 50MB)
     display = Display(visible=0, size=(800, 600), color_depth=8)
     display.start()
-    print("✅ Xvfb يعمل (800x600, 8bit) - خفيف جداً")
+    print("✅ Xvfb يعمل (800x600)")
 except Exception as e:
-    print(f"⚠️ فشل Xvfb: {e}")
-    # محاولة ثانية بإعدادات أبسط
+    print(f"⚠️ Xvfb: {e}")
     try:
         display = Display(visible=0, size=(800, 600))
         display.start()
-        print("✅ Xvfb يعمل (800x600)")
+        print("✅ Xvfb يعمل")
     except Exception as e2:
-        print(f"❌ Xvfb فشل نهائياً: {e2}")
+        print(f"❌ Xvfb فشل: {e2}")
 
 
 # ─────────────────────────────────────────────
-# 🛡️ سكربت تخفي مختصر
-# ─────────────────────────────────────────────
-STEALTH_JS = '''
-Object.defineProperty(navigator,'webdriver',{get:()=>undefined});
-Object.defineProperty(navigator,'languages',{get:()=>['en-US','en']});
-Object.defineProperty(navigator,'platform',{get:()=>'Win32'});
-Object.defineProperty(navigator,'vendor',{get:()=>'Google Inc.'});
-Object.defineProperty(navigator,'hardwareConcurrency',{get:()=>4});
-Object.defineProperty(navigator,'deviceMemory',{get:()=>8});
-Object.defineProperty(navigator,'maxTouchPoints',{get:()=>0});
-
-window.chrome={runtime:{onMessage:{addListener:function(){}},sendMessage:function(){},
-connect:function(){return{onMessage:{addListener:function(){}},postMessage:function(){}}}}};
-window.chrome.loadTimes=function(){return{commitLoadTime:Date.now()/1000,
-connectionInfo:'http/1.1',finishLoadTime:Date.now()/1000,navigationType:'Other',
-requestTime:Date.now()/1000-0.16,startLoadTime:Date.now()/1000}};
-window.chrome.csi=function(){return{onloadT:Date.now(),pageT:Date.now()/1000,startE:Date.now(),tran:15}};
-
-if(navigator.permissions){
-    var o=navigator.permissions.query;
-    navigator.permissions.query=function(p){
-        if(p.name==='notifications')return Promise.resolve({state:'prompt'});
-        return o.call(navigator.permissions,p);
-    };
-}
-
-try{var g=WebGLRenderingContext.prototype.getParameter;
-WebGLRenderingContext.prototype.getParameter=function(p){
-if(p===37445)return'Intel Inc.';if(p===37446)return'Intel Iris OpenGL Engine';
-return g.call(this,p);};}catch(e){}
-
-Object.defineProperty(screen,'width',{get:()=>1920});
-Object.defineProperty(screen,'height',{get:()=>1080});
-Object.defineProperty(screen,'colorDepth',{get:()=>24});
-Object.defineProperty(screen,'pixelDepth',{get:()=>24});
-Object.defineProperty(screen,'availWidth',{get:()=>1920});
-Object.defineProperty(screen,'availHeight',{get:()=>1040});
-
-for(var p in window){if(p.match(/^cdc_/)){try{delete window[p]}catch(e){}}}
-for(var p in document){if(p.match(/^cdc_|\\$cdc_/)){try{delete document[p]}catch(e){}}}
-'''
-
-# ─────────────────────────────────────────────
-# 🔍 البحث عن المتصفح
+# 🔍 البحث عن المتصفح والدرايفر
 # ─────────────────────────────────────────────
 def find_path(names, extras=None):
     for n in names:
@@ -123,8 +78,120 @@ def find_path(names, extras=None):
     return None
 
 
+def get_browser_version(browser_path):
+    """معرفة إصدار المتصفح الحقيقي"""
+    try:
+        r = subprocess.run([browser_path, '--version'],
+                          capture_output=True, text=True, timeout=5)
+        m = re.search(r'(\d+)', r.stdout)
+        return m.group(1) if m else "120"
+    except Exception:
+        return "120"
+
+
 # ─────────────────────────────────────────────
-# 🌐 متصفح محسّن (Xvfb + تخفي + خفيف)
+# 🔧 تصحيح chromedriver (إزالة cdc_)
+# ─── هذا هو الحل الحقيقي ───
+# ─────────────────────────────────────────────
+def patch_chromedriver(original_path):
+    """
+    إزالة متغيرات cdc_ من chromedriver
+    هذا بالضبط ما تفعله مكتبة undetected-chromedriver
+    لكن بدون تحميل أي شيء من الإنترنت
+    """
+    patched_path = '/tmp/chromedriver_patched'
+
+    # نسخ الملف الأصلي
+    shutil.copy2(original_path, patched_path)
+    os.chmod(patched_path, 0o755)
+
+    with open(patched_path, 'r+b') as f:
+        content = f.read()
+        count = content.count(b'cdc_')
+
+        if count > 0:
+            # استبدال cdc_ بـ aaa_ (نفس الطول = لا يكسر الملف)
+            new_content = content.replace(b'cdc_', b'aaa_')
+            f.seek(0)
+            f.write(new_content)
+            print(f"✅ تم تصحيح chromedriver: {count} نمط cdc_ تم إزالته")
+        else:
+            print("ℹ️ chromedriver نظيف بالفعل")
+
+    return patched_path
+
+
+# ─────────────────────────────────────────────
+# 🛡️ سكربت التخفي
+# ─────────────────────────────────────────────
+STEALTH_JS = '''
+// 1. إخفاء webdriver
+Object.defineProperty(navigator,'webdriver',{get:()=>undefined});
+
+// 2. Plugins
+Object.defineProperty(navigator,'plugins',{
+    get:function(){
+        return[{name:'Chrome PDF Plugin',filename:'internal-pdf-viewer',length:1},
+               {name:'Chrome PDF Viewer',filename:'mhjfbmdgcfjbbpaeojofohoefgiehjai',length:1},
+               {name:'Native Client',filename:'internal-nacl-plugin',length:2}];
+    }
+});
+
+// 3. Languages & Platform
+Object.defineProperty(navigator,'languages',{get:()=>['en-US','en']});
+Object.defineProperty(navigator,'platform',{get:()=>'Win32'});
+Object.defineProperty(navigator,'vendor',{get:()=>'Google Inc.'});
+Object.defineProperty(navigator,'hardwareConcurrency',{get:()=>4});
+Object.defineProperty(navigator,'deviceMemory',{get:()=>8});
+Object.defineProperty(navigator,'maxTouchPoints',{get:()=>0});
+
+// 4. Chrome runtime
+window.chrome=window.chrome||{};
+window.chrome.runtime={
+    onMessage:{addListener:function(){},removeListener:function(){}},
+    sendMessage:function(){},
+    connect:function(){return{onMessage:{addListener:function(){}},postMessage:function(){}};}
+};
+window.chrome.loadTimes=function(){
+    return{commitLoadTime:Date.now()/1000,connectionInfo:'http/1.1',
+    finishLoadTime:Date.now()/1000,navigationType:'Other',
+    requestTime:Date.now()/1000-0.16,startLoadTime:Date.now()/1000};
+};
+window.chrome.csi=function(){
+    return{onloadT:Date.now(),pageT:Date.now()/1000,startE:Date.now(),tran:15};
+};
+
+// 5. Permissions
+if(navigator.permissions){
+    var o=navigator.permissions.query;
+    navigator.permissions.query=function(p){
+        if(p.name==='notifications')return Promise.resolve({state:'prompt'});
+        return o.call(navigator.permissions,p);
+    };
+}
+
+// 6. WebGL
+try{var g=WebGLRenderingContext.prototype.getParameter;
+WebGLRenderingContext.prototype.getParameter=function(p){
+    if(p===37445)return'Intel Inc.';
+    if(p===37446)return'Intel Iris OpenGL Engine';
+    return g.call(this,p);
+};}catch(e){}
+
+// 7. Screen
+Object.defineProperty(screen,'width',{get:()=>1920});
+Object.defineProperty(screen,'height',{get:()=>1080});
+Object.defineProperty(screen,'colorDepth',{get:()=>24});
+Object.defineProperty(screen,'pixelDepth',{get:()=>24});
+
+// 8. حذف أي cdc_ متبقي (احتياطي)
+for(var p in window){if(/^cdc_/.test(p)){try{delete window[p]}catch(e){}}}
+for(var p in document){if(/cdc_|\\$cdc_/.test(p)){try{delete document[p]}catch(e){}}}
+'''
+
+
+# ─────────────────────────────────────────────
+# 🌐 إنشاء المتصفح
 # ─────────────────────────────────────────────
 def get_driver():
     browser = find_path(
@@ -141,99 +208,107 @@ def get_driver():
     if not drv:
         raise Exception("❌ ChromeDriver غير موجود!")
 
+    # ✅ الخطوة الأهم: تصحيح chromedriver
+    patched_drv = patch_chromedriver(drv)
+
+    # معرفة إصدار المتصفح الحقيقي
+    version = get_browser_version(browser)
+    ua = f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{version}.0.0.0 Safari/537.36"
+    print(f"🌐 Chromium v{version}")
+
     options = Options()
     options.binary_location = browser
 
-    # ═══════════════════════════════════════════
-    # ✅ بدون --headless (Xvfb يعمل كشاشة)
-    # هذا هو السر - Google لا يكتشف Xvfb
-    # ═══════════════════════════════════════════
-
-    # 🛡️ تخفي
+    # ═══════════════════════════════════════
+    # 🛡️ تخفي (بدون headless!)
+    # ═══════════════════════════════════════
     options.add_argument('--disable-blink-features=AutomationControlled')
     options.add_experimental_option("excludeSwitches", ["enable-automation"])
     options.add_experimental_option('useAutomationExtension', False)
-    options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+    options.add_argument(f'--user-agent={ua}')
+    options.add_argument('--lang=en-US')
 
-    # ⚡ توفير موارد
+    # ═══════════════════════════════════════
+    # Docker فقط
+    # ═══════════════════════════════════════
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--disable-gpu')
-    options.add_argument('--single-process')
-    options.add_argument('--no-zygote')
-    options.add_argument('--renderer-process-limit=1')
-    options.add_argument('--window-size=800,600')
 
-    # 🔇 تعطيل غير ضروري
-    options.add_argument('--disable-extensions')
-    options.add_argument('--disable-plugins')
-    options.add_argument('--disable-software-rasterizer')
-    options.add_argument('--disable-background-networking')
-    options.add_argument('--disable-default-apps')
-    options.add_argument('--disable-sync')
-    options.add_argument('--disable-translate')
-    options.add_argument('--disable-features=TranslateUI')
-    options.add_argument('--disable-hang-monitor')
-    options.add_argument('--disable-domain-reliability')
-    options.add_argument('--disable-component-update')
+    # ═══════════════════════════════════════
+    # ⚡ توفير موارد (بدون أعلام مشبوهة)
+    # ═══════════════════════════════════════
+    options.add_argument('--window-size=800,600')
+    options.add_argument('--renderer-process-limit=1')
     options.add_argument('--disable-background-timer-throttling')
     options.add_argument('--disable-backgrounding-occluded-windows')
     options.add_argument('--disable-renderer-backgrounding')
-    options.add_argument('--disable-ipc-flooding-protection')
     options.add_argument('--no-first-run')
     options.add_argument('--no-default-browser-check')
-    options.add_argument('--metrics-recording-only')
     options.add_argument('--mute-audio')
-    options.add_argument('--disable-popup-blocking')
-    options.add_argument('--lang=en-US')
-
-    # حد ذاكرة JS
+    options.add_argument('--disable-features=TranslateUI')
     options.add_argument('--js-flags=--max-old-space-size=128')
-
-    # تعطيل تحميل الصور (توفير RAM)
-    prefs = {
-        'profile.managed_default_content_settings.images': 2,
-        'profile.default_content_setting_values.notifications': 2,
-        'disk-cache-size': 1,
-    }
-    options.add_experimental_option('prefs', prefs)
+    options.add_argument('--disk-cache-size=0')
 
     options.page_load_strategy = 'eager'
 
-    print("🚀 إنشاء المتصفح (Xvfb + تخفي)...")
+    print("🚀 إنشاء المتصفح (chromedriver مُصحَّح + Xvfb)...")
 
-    service = Service(executable_path=drv)
+    # ✅ استخدام chromedriver المُصحَّح
+    service = Service(executable_path=patched_drv)
     driver = webdriver.Chrome(service=service, options=options)
 
-    # حقن سكربت التخفي
+    # ✅ حقن سكربت التخفي في كل صفحة
     try:
         driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
             'source': STEALTH_JS
         })
-        print("🛡️ تخفي JS ✓")
+        print("🛡️ Stealth JS ✓")
     except Exception as e:
-        print(f"⚠️ فشل JS: {e}")
+        print(f"⚠️ JS: {e}")
 
-    # تنظيف User-Agent
+    # ✅ تنظيف User-Agent عبر CDP
     try:
         driver.execute_cdp_cmd('Network.setUserAgentOverride', {
-            "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "userAgent": ua,
             "platform": "Win32",
             "acceptLanguage": "en-US,en;q=0.9"
         })
-        print("🛡️ User-Agent ✓")
+        print("🛡️ UA ✓")
     except Exception:
         pass
 
     driver.set_page_load_timeout(25)
 
-    # ✅ فحص التخفي
+    # ═══════════════════════════════════════
+    # 🔍 فحص التخفي
+    # ═══════════════════════════════════════
     try:
         driver.get("about:blank")
+
+        # فحص webdriver
         wd = driver.execute_script("return navigator.webdriver")
-        print(f"🔍 navigator.webdriver = {wd} {'✅' if wd is None or wd == False else '❌'}")
-    except Exception:
-        pass
+        print(f"🔍 navigator.webdriver = {wd} {'✅' if not wd else '❌'}")
+
+        # فحص cdc_
+        cdc = driver.execute_script("""
+            var found = [];
+            for (var k in document) {
+                if (/cdc_|\\$cdc_/.test(k)) found.push(k);
+            }
+            for (var k in window) {
+                if (/cdc_|\\$cdc_/.test(k)) found.push(k);
+            }
+            return found.length > 0 ? found.join(',') : 'CLEAN';
+        """)
+        print(f"🔍 cdc_ check = {cdc} {'✅' if cdc == 'CLEAN' else '❌'}")
+
+        # فحص chrome runtime
+        cr = driver.execute_script("return typeof window.chrome !== 'undefined' && typeof window.chrome.runtime !== 'undefined'")
+        print(f"🔍 chrome.runtime = {cr} {'✅' if cr else '❌'}")
+
+    except Exception as e:
+        print(f"⚠️ فحص: {e}")
 
     print("✅ المتصفح جاهز!")
     return driver
@@ -312,7 +387,6 @@ def stream_loop(chat_id, gen):
             url = driver.current_url
             status = "مراقبة..."
 
-            # ─── الطيار الآلي (كل دورتين) ───
             if cycle % 2 == 0:
                 if not session.get('shell_opened'):
                     # I understand
@@ -338,11 +412,18 @@ def stream_loop(chat_id, gen):
                             except Exception:
                                 pass
 
-                    # كشف رفض الدخول
+                    # كشف الرفض
                     try:
                         body = driver.find_element(By.TAG_NAME, "body").text.lower()
                         if "couldn't sign you in" in body:
-                            status = "⚠️ Google رفض الدخول"
+                            status = "⚠️ رفض - جاري إعادة المحاولة..."
+                            try:
+                                driver.delete_all_cookies()
+                                time.sleep(1)
+                                driver.get(session.get('url', 'about:blank'))
+                                time.sleep(5)
+                            except Exception:
+                                pass
                     except Exception:
                         pass
                 else:
@@ -365,7 +446,7 @@ def stream_loop(chat_id, gen):
                     else:
                         status = "✅ يعمل"
 
-            # ─── 📸 لقطة ───
+            # 📸 لقطة
             png = driver.get_screenshot_as_png()
             bio = io.BytesIO(png)
             bio.name = f'l_{int(time.time())}.png'
@@ -391,21 +472,17 @@ def stream_loop(chat_id, gen):
 
         except Exception as e:
             em = str(e).lower()
-
             if "message is not modified" in em:
                 continue
-
             err_count += 1
-
             if "too many requests" in em or "retry after" in em:
                 w = re.search(r'retry after (\d+)', em)
                 time.sleep(int(w.group(1)) if w else 5)
-
             elif any(k in em for k in ['session', 'disconnected', 'crashed', 'not reachable']):
                 drv_err += 1
                 if drv_err >= 3:
                     try:
-                        bot.send_message(chat_id, "⚠️ المتصفح تعطل! إعادة تشغيل...")
+                        bot.send_message(chat_id, "⚠️ إعادة تشغيل المتصفح...")
                     except Exception:
                         pass
                     try:
@@ -422,7 +499,6 @@ def stream_loop(chat_id, gen):
                     except Exception:
                         session['running'] = False
                         break
-
             elif err_count >= 5:
                 try:
                     driver.refresh()
@@ -446,7 +522,7 @@ def start_stream(chat_id, url):
             old['gen'] = old.get('gen', 0) + 1
             old_drv = old.get('driver')
 
-    bot.send_message(chat_id, "⚡ جاري التجهيز...")
+    bot.send_message(chat_id, "⚡ جاري التجهيز (chromedriver مُصحَّح)...")
 
     if old_drv:
         safe_quit(old_drv)
@@ -457,7 +533,7 @@ def start_stream(chat_id, url):
 
     try:
         driver = get_driver()
-        bot.send_message(chat_id, "✅ المتصفح جاهز (Xvfb + تخفي)")
+        bot.send_message(chat_id, "✅ المتصفح جاهز")
     except Exception as e:
         bot.send_message(chat_id, f"❌ فشل:\n`{str(e)[:300]}`", parse_mode="Markdown")
         return
@@ -475,7 +551,6 @@ def start_stream(chat_id, url):
 
     session = user_sessions[chat_id]
 
-    # فتح الرابط مباشرة
     bot.send_message(chat_id, "🌐 فتح الرابط...")
 
     try:
@@ -507,7 +582,7 @@ def start_stream(chat_id, url):
         t = threading.Thread(target=stream_loop, args=(chat_id, gen), daemon=True)
         t.start()
 
-        bot.send_message(chat_id, "✅ البث يعمل! (تحديث كل ~10 ثوانٍ)")
+        bot.send_message(chat_id, "✅ البث يعمل!")
 
     except Exception as e:
         bot.send_message(chat_id, f"❌ فشل:\n`{str(e)[:200]}`", parse_mode="Markdown")
@@ -520,7 +595,7 @@ def start_stream(chat_id, url):
 @bot.message_handler(commands=['start'])
 def cmd_start(message):
     bot.reply_to(message,
-        "🚀 مرحباً!\n\n"
+        "🚀 مرحباً!\n"
         "أرسل رابط يبدأ بـ:\n"
         "`https://www.skills.google/google_sso`",
         parse_mode="Markdown"
@@ -534,7 +609,7 @@ def handle_url(message):
 
 @bot.message_handler(func=lambda m: m.text and m.text.startswith('http'))
 def handle_bad(message):
-    bot.reply_to(message, "❌ الرابط يجب أن يبدأ بـ:\n`https://www.skills.google/google_sso`", parse_mode="Markdown")
+    bot.reply_to(message, "❌ يجب أن يبدأ بـ:\n`https://www.skills.google/google_sso`", parse_mode="Markdown")
 
 
 @bot.callback_query_handler(func=lambda call: True)
@@ -559,7 +634,6 @@ def on_cb(call):
             with sessions_lock:
                 if cid in user_sessions:
                     del user_sessions[cid]
-            gc.collect()
 
         elif call.data == "refresh":
             bot.answer_callback_query(call.id, "تحديث...")
@@ -585,10 +659,10 @@ def run_bot():
 
 
 if __name__ == '__main__':
-    print("=" * 45)
-    print("⚡ Xvfb + تخفي + خفيف (512MB)")
-    print(f"🌐 بورت: {os.getenv('PORT', 8000)}")
-    print("=" * 45)
+    print("=" * 50)
+    print("🔧 chromedriver patching + Xvfb + Stealth")
+    print(f"🌐 Port: {os.getenv('PORT', 8000)}")
+    print("=" * 50)
 
     threading.Thread(target=start_health_server, daemon=True).start()
     run_bot()
