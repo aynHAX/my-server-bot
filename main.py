@@ -15,6 +15,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from pyvirtualdisplay import Display
 
 TOKEN = os.getenv('BOT_TOKEN')
 if not TOKEN:
@@ -25,7 +26,7 @@ user_sessions = {}
 sessions_lock = threading.Lock()
 
 # ─────────────────────────────────────────────
-# 🌐 Health Check خفيف جداً (بدون Flask)
+# 🌐 Health Check (بدون Flask - خفيف)
 # ─────────────────────────────────────────────
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -35,18 +36,38 @@ class HealthHandler(BaseHTTPRequestHandler):
         self.wfile.write(b"OK")
 
     def log_message(self, format, *args):
-        pass  # لا نطبع أي شيء لتوفير CPU
+        pass
 
 
 def start_health_server():
     port = int(os.getenv('PORT', 8000))
     server = HTTPServer(('0.0.0.0', port), HealthHandler)
-    print(f"🌐 Health Check على البورت {port}")
+    print(f"🌐 Health Check: port {port}")
     server.serve_forever()
 
 
 # ─────────────────────────────────────────────
-# 🛡️ سكربت تخفي مختصر (توفير ذاكرة)
+# 🖥️ شاشة وهمية خفيفة (بدل headless)
+# ─────────────────────────────────────────────
+display = None
+try:
+    # ✅ 800x600 + 8bit = ~10MB RAM فقط (بدل 1920x1080 24bit = 50MB)
+    display = Display(visible=0, size=(800, 600), color_depth=8)
+    display.start()
+    print("✅ Xvfb يعمل (800x600, 8bit) - خفيف جداً")
+except Exception as e:
+    print(f"⚠️ فشل Xvfb: {e}")
+    # محاولة ثانية بإعدادات أبسط
+    try:
+        display = Display(visible=0, size=(800, 600))
+        display.start()
+        print("✅ Xvfb يعمل (800x600)")
+    except Exception as e2:
+        print(f"❌ Xvfb فشل نهائياً: {e2}")
+
+
+# ─────────────────────────────────────────────
+# 🛡️ سكربت تخفي مختصر
 # ─────────────────────────────────────────────
 STEALTH_JS = '''
 Object.defineProperty(navigator,'webdriver',{get:()=>undefined});
@@ -55,7 +76,15 @@ Object.defineProperty(navigator,'platform',{get:()=>'Win32'});
 Object.defineProperty(navigator,'vendor',{get:()=>'Google Inc.'});
 Object.defineProperty(navigator,'hardwareConcurrency',{get:()=>4});
 Object.defineProperty(navigator,'deviceMemory',{get:()=>8});
-window.chrome={runtime:{onMessage:{addListener:function(){}},sendMessage:function(){}}};
+Object.defineProperty(navigator,'maxTouchPoints',{get:()=>0});
+
+window.chrome={runtime:{onMessage:{addListener:function(){}},sendMessage:function(){},
+connect:function(){return{onMessage:{addListener:function(){}},postMessage:function(){}}}}};
+window.chrome.loadTimes=function(){return{commitLoadTime:Date.now()/1000,
+connectionInfo:'http/1.1',finishLoadTime:Date.now()/1000,navigationType:'Other',
+requestTime:Date.now()/1000-0.16,startLoadTime:Date.now()/1000}};
+window.chrome.csi=function(){return{onloadT:Date.now(),pageT:Date.now()/1000,startE:Date.now(),tran:15}};
+
 if(navigator.permissions){
     var o=navigator.permissions.query;
     navigator.permissions.query=function(p){
@@ -63,29 +92,43 @@ if(navigator.permissions){
         return o.call(navigator.permissions,p);
     };
 }
+
+try{var g=WebGLRenderingContext.prototype.getParameter;
+WebGLRenderingContext.prototype.getParameter=function(p){
+if(p===37445)return'Intel Inc.';if(p===37446)return'Intel Iris OpenGL Engine';
+return g.call(this,p);};}catch(e){}
+
+Object.defineProperty(screen,'width',{get:()=>1920});
+Object.defineProperty(screen,'height',{get:()=>1080});
+Object.defineProperty(screen,'colorDepth',{get:()=>24});
+Object.defineProperty(screen,'pixelDepth',{get:()=>24});
+Object.defineProperty(screen,'availWidth',{get:()=>1920});
+Object.defineProperty(screen,'availHeight',{get:()=>1040});
+
+for(var p in window){if(p.match(/^cdc_/)){try{delete window[p]}catch(e){}}}
+for(var p in document){if(p.match(/^cdc_|\\$cdc_/)){try{delete document[p]}catch(e){}}}
 '''
 
 # ─────────────────────────────────────────────
 # 🔍 البحث عن المتصفح
 # ─────────────────────────────────────────────
-def find_path(names, extra_paths=None):
-    for name in names:
-        p = shutil.which(name)
+def find_path(names, extras=None):
+    for n in names:
+        p = shutil.which(n)
         if p:
             return p
-    if extra_paths:
-        for p in extra_paths:
-            if os.path.isfile(p):
-                return p
+    for p in (extras or []):
+        if os.path.isfile(p):
+            return p
     return None
 
 
 # ─────────────────────────────────────────────
-# 🌐 متصفح خفيف جداً (محسّن لـ 512MB RAM)
+# 🌐 متصفح محسّن (Xvfb + تخفي + خفيف)
 # ─────────────────────────────────────────────
 def get_driver():
     browser = find_path(
-        ['chromium', 'chromium-browser', 'google-chrome'],
+        ['chromium', 'chromium-browser'],
         ['/usr/bin/chromium', '/usr/bin/chromium-browser']
     )
     drv = find_path(
@@ -102,20 +145,26 @@ def get_driver():
     options.binary_location = browser
 
     # ═══════════════════════════════════════════
-    # ⚡ إعدادات توفير الموارد (الأهم)
+    # ✅ بدون --headless (Xvfb يعمل كشاشة)
+    # هذا هو السر - Google لا يكتشف Xvfb
     # ═══════════════════════════════════════════
-    options.add_argument('--headless=new')           # بدون شاشة = توفير 50MB RAM
+
+    # 🛡️ تخفي
+    options.add_argument('--disable-blink-features=AutomationControlled')
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option('useAutomationExtension', False)
+    options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+
+    # ⚡ توفير موارد
     options.add_argument('--no-sandbox')
     options.add_argument('--disable-dev-shm-usage')
     options.add_argument('--disable-gpu')
-    options.add_argument('--single-process')          # عملية واحدة = توفير 100MB RAM
-    options.add_argument('--no-zygote')               # لا forking
+    options.add_argument('--single-process')
+    options.add_argument('--no-zygote')
     options.add_argument('--renderer-process-limit=1')
-    options.add_argument('--window-size=800,600')     # نافذة صغيرة = توفير 150MB RAM
+    options.add_argument('--window-size=800,600')
 
-    # ═══════════════════════════════════════════
-    # 🔇 تعطيل كل شيء غير ضروري
-    # ═══════════════════════════════════════════
+    # 🔇 تعطيل غير ضروري
     options.add_argument('--disable-extensions')
     options.add_argument('--disable-plugins')
     options.add_argument('--disable-software-rasterizer')
@@ -123,7 +172,7 @@ def get_driver():
     options.add_argument('--disable-default-apps')
     options.add_argument('--disable-sync')
     options.add_argument('--disable-translate')
-    options.add_argument('--disable-features=TranslateUI,BlinkGenPropertyTrees,site-per-process')
+    options.add_argument('--disable-features=TranslateUI')
     options.add_argument('--disable-hang-monitor')
     options.add_argument('--disable-domain-reliability')
     options.add_argument('--disable-component-update')
@@ -135,33 +184,23 @@ def get_driver():
     options.add_argument('--no-default-browser-check')
     options.add_argument('--metrics-recording-only')
     options.add_argument('--mute-audio')
+    options.add_argument('--disable-popup-blocking')
+    options.add_argument('--lang=en-US')
 
-    # تحديد ذاكرة JS
+    # حد ذاكرة JS
     options.add_argument('--js-flags=--max-old-space-size=128')
 
-    # ═══════════════════════════════════════════
-    # 🖼️ تعطيل تحميل الصور (توفير RAM + سرعة)
-    # ═══════════════════════════════════════════
+    # تعطيل تحميل الصور (توفير RAM)
     prefs = {
         'profile.managed_default_content_settings.images': 2,
         'profile.default_content_setting_values.notifications': 2,
-        'profile.managed_default_content_settings.stylesheets': 1,
-        'profile.managed_default_content_settings.plugins': 2,
         'disk-cache-size': 1,
     }
     options.add_experimental_option('prefs', prefs)
 
-    # ═══════════════════════════════════════════
-    # 🛡️ تخفي أساسي
-    # ═══════════════════════════════════════════
-    options.add_argument('--disable-blink-features=AutomationControlled')
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option('useAutomationExtension', False)
-    options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
-
     options.page_load_strategy = 'eager'
 
-    print("🚀 إنشاء المتصفح (وضع خفيف)...")
+    print("🚀 إنشاء المتصفح (Xvfb + تخفي)...")
 
     service = Service(executable_path=drv)
     driver = webdriver.Chrome(service=service, options=options)
@@ -171,11 +210,32 @@ def get_driver():
         driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
             'source': STEALTH_JS
         })
+        print("🛡️ تخفي JS ✓")
+    except Exception as e:
+        print(f"⚠️ فشل JS: {e}")
+
+    # تنظيف User-Agent
+    try:
+        driver.execute_cdp_cmd('Network.setUserAgentOverride', {
+            "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "platform": "Win32",
+            "acceptLanguage": "en-US,en;q=0.9"
+        })
+        print("🛡️ User-Agent ✓")
     except Exception:
         pass
 
     driver.set_page_load_timeout(25)
-    print("✅ المتصفح جاهز (وضع خفيف)")
+
+    # ✅ فحص التخفي
+    try:
+        driver.get("about:blank")
+        wd = driver.execute_script("return navigator.webdriver")
+        print(f"🔍 navigator.webdriver = {wd} {'✅' if wd is None or wd == False else '❌'}")
+    except Exception:
+        pass
+
+    print("✅ المتصفح جاهز!")
     return driver
 
 
@@ -188,7 +248,7 @@ def safe_quit(driver):
             driver.quit()
         except Exception:
             pass
-        gc.collect()  # تنظيف الذاكرة فوراً
+        gc.collect()
 
 
 def cleanup_session(chat_id):
@@ -222,7 +282,7 @@ def panel():
 
 
 # ─────────────────────────────────────────────
-# 🎬 حلقة البث (محسّنة لـ 0.1 vCPU)
+# 🎬 حلقة البث
 # ─────────────────────────────────────────────
 def stream_loop(chat_id, gen):
     with sessions_lock:
@@ -237,7 +297,6 @@ def stream_loop(chat_id, gen):
     cycle = 0
 
     while session['running'] and session.get('gen') == gen:
-        # ✅ تحديث كل 8-12 ثانية بدل 3-5 (توفير CPU كبير)
         time.sleep(random.uniform(8, 12))
 
         if not session['running'] or session.get('gen') != gen:
@@ -253,7 +312,7 @@ def stream_loop(chat_id, gen):
             url = driver.current_url
             status = "مراقبة..."
 
-            # ─── الطيار الآلي (كل دورتين فقط لتوفير CPU) ───
+            # ─── الطيار الآلي (كل دورتين) ───
             if cycle % 2 == 0:
                 if not session.get('shell_opened'):
                     # I understand
@@ -283,7 +342,7 @@ def stream_loop(chat_id, gen):
                     try:
                         body = driver.find_element(By.TAG_NAME, "body").text.lower()
                         if "couldn't sign you in" in body:
-                            status = "⚠️ رفض الدخول"
+                            status = "⚠️ Google رفض الدخول"
                     except Exception:
                         pass
                 else:
@@ -327,7 +386,6 @@ def stream_loop(chat_id, gen):
             err_count = 0
             drv_err = 0
 
-            # ✅ تنظيف ذاكرة كل 10 دورات
             if cycle % 10 == 0:
                 gc.collect()
 
@@ -380,7 +438,6 @@ def stream_loop(chat_id, gen):
 # ▶️ بدء البث
 # ─────────────────────────────────────────────
 def start_stream(chat_id, url):
-    # إيقاف قديم
     old_drv = None
     with sessions_lock:
         if chat_id in user_sessions:
@@ -389,7 +446,7 @@ def start_stream(chat_id, url):
             old['gen'] = old.get('gen', 0) + 1
             old_drv = old.get('driver')
 
-    bot.send_message(chat_id, "⚡ جاري التجهيز (وضع خفيف)...")
+    bot.send_message(chat_id, "⚡ جاري التجهيز...")
 
     if old_drv:
         safe_quit(old_drv)
@@ -398,10 +455,9 @@ def start_stream(chat_id, url):
     project_match = re.search(r'(qwiklabs-gcp-[\w-]+)', url)
     project_id = project_match.group(1) if project_match else None
 
-    # ─── إنشاء المتصفح ───
     try:
         driver = get_driver()
-        bot.send_message(chat_id, "✅ المتصفح جاهز")
+        bot.send_message(chat_id, "✅ المتصفح جاهز (Xvfb + تخفي)")
     except Exception as e:
         bot.send_message(chat_id, f"❌ فشل:\n`{str(e)[:300]}`", parse_mode="Markdown")
         return
@@ -419,7 +475,7 @@ def start_stream(chat_id, url):
 
     session = user_sessions[chat_id]
 
-    # ─── فتح الرابط مباشرة (بدون تسخين لتوفير الموارد) ───
+    # فتح الرابط مباشرة
     bot.send_message(chat_id, "🌐 فتح الرابط...")
 
     try:
@@ -430,7 +486,6 @@ def start_stream(chat_id, url):
 
     time.sleep(5)
 
-    # ─── أول لقطة ───
     try:
         handles = driver.window_handles
         if handles:
@@ -460,12 +515,12 @@ def start_stream(chat_id, url):
 
 
 # ─────────────────────────────────────────────
-# 📨 أوامر تيليغرام
+# 📨 أوامر
 # ─────────────────────────────────────────────
 @bot.message_handler(commands=['start'])
 def cmd_start(message):
     bot.reply_to(message,
-        "🚀 مرحباً! (وضع خفيف)\n\n"
+        "🚀 مرحباً!\n\n"
         "أرسل رابط يبدأ بـ:\n"
         "`https://www.skills.google/google_sso`",
         parse_mode="Markdown"
@@ -530,13 +585,10 @@ def run_bot():
 
 
 if __name__ == '__main__':
-    print("=" * 40)
-    print("⚡ وضع خفيف (0.1 CPU / 512MB RAM)")
+    print("=" * 45)
+    print("⚡ Xvfb + تخفي + خفيف (512MB)")
     print(f"🌐 بورت: {os.getenv('PORT', 8000)}")
-    print("=" * 40)
+    print("=" * 45)
 
-    # Health Check
     threading.Thread(target=start_health_server, daemon=True).start()
-
-    # البوت
     run_bot()
