@@ -5,6 +5,7 @@ import queue
 import io
 import http.server
 import socketserver
+import subprocess
 import telebot
 from telebot.types import InputMediaPhoto, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 import re
@@ -12,6 +13,10 @@ import base64
 import pymongo
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.common.exceptions import (
+    TimeoutException, WebDriverException, 
+    SessionNotCreatedException, NoSuchWindowException
+)
 from pyvirtualdisplay import Display
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
@@ -76,6 +81,39 @@ def cookie_cleanup_worker():
 threading.Thread(target=cookie_cleanup_worker, daemon=True).start()
 
 # ==========================================
+# 🔄 حراسة الجلسات المعلقة (Watchdog)
+# ==========================================
+def session_watchdog():
+    """يكتشف الجلسات المعلقة تلقائياً وينظفها"""
+    while True:
+        time.sleep(120)
+        try:
+            if USE_MONGO:
+                stuck_sessions = users_col.find({"active": True})
+                for s in stuck_sessions:
+                    last_time = s.get('interaction_time', 0)
+                    if last_time and time.time() - last_time > 600:
+                        cid = s.get('chat_id')
+                        clear_session(cid)
+                        try:
+                            bot.send_message(cid, "⏳ **تم إنهاء جلستك تلقائياً بسبب عدم النشاط.**\nيمكنك إرسال الرابط مرة أخرى.", parse_mode="Markdown")
+                        except: pass
+                        print(f"🔄 [Watchdog] Cleaned stuck session for {cid}")
+            else:
+                for cid, s in list(users_col.items()):
+                    if s.get('active'):
+                        last_time = s.get('interaction_time', 0)
+                        if last_time and time.time() - last_time > 600:
+                            clear_session(cid)
+                            try:
+                                bot.send_message(cid, "⏳ **تم إنهاء جلستك تلقائياً بسبب عدم النشاط.**\nيمكنك إرسال الرابط مرة أخرى.", parse_mode="Markdown")
+                            except: pass
+        except Exception as e:
+            print(f"❌ [Watchdog Error] {e}")
+
+threading.Thread(target=session_watchdog, daemon=True).start()
+
+# ==========================================
 # 🛡️ نظام الحماية (VIP System)
 # ==========================================
 def is_vip(user_id):
@@ -127,7 +165,8 @@ def clear_session(chat_id):
     update_session(chat_id, {
         "active": False, "status": "idle", "selected_region": None, 
         "protocol": None, "target_url": None, "available_regions": {}, "replace_mode": False,
-        "ui_msg_id": None, "email": None, "password": None, "interaction_time": 0
+        "add_new_mode": False, "ui_msg_id": None, "email": None, "password": None, 
+        "interaction_time": 0, "old_server_name": None
     })
 
 def get_server_by_url(url):
@@ -205,7 +244,6 @@ cat > .dockerignore << 'EOF'
 EOF
 
 echo "Attempting Ultimate Gaming Deployment..."
-# المحاولة الأولى: بأقصى قوة مع إلغاء خنق المعالج
 gcloud run deploy ${SERVICE_NAME} \
   --source . \
   --region=${REGION} \
@@ -222,7 +260,6 @@ gcloud run deploy ${SERVICE_NAME} \
   --no-cpu-throttling \
   --quiet
 
-# نظام التعافي التلقائي (Fallback System) إذا رفض الحساب الإعدادات
 if [ $? -ne 0 ]; then
     echo "First attempt rejected due to Qwiklabs Quota/Flags. Retrying with Safe Mode..."
     gcloud run deploy ${SERVICE_NAME} \
@@ -241,7 +278,6 @@ if [ $? -ne 0 ]; then
       --quiet
       
     if [ $? -ne 0 ]; then
-        # إرسال رسالة توضيحية للمستخدم فقط إذا فشلت المحاولتان مع الحفاظ على التنسيق
         ERROR_PAYLOAD=$(jq -n \
           --arg chat_id "<CHAT_ID_PLACEHOLDER>" \
           --arg text "❌ **فشل البناء النهائي (Deployment Failed):**
@@ -260,7 +296,6 @@ if [ $? -ne 0 ]; then
     fi
 fi
 
-# إجبار النظام على استخدام تنسيق الرابط الكلاسيكي برقم المشروع والمنطقة
 SERVICE_HOST="${SERVICE_NAME}-${PROJECT_NUMBER}.${REGION}.run.app"
 
 <LINK_GENERATION_PLACEHOLDER>
@@ -268,7 +303,6 @@ SERVICE_HOST="${SERVICE_NAME}-${PROJECT_NUMBER}.${REGION}.run.app"
 echo "OCX_DATA_SYNC: ${SERVICE_NAME}|${REGION}|${PROTOCOL}|${UUID}"
 sleep 2
 
-# رسالة النجاح منسقة بشكل صحيح لتظهر الروابط قابلة للنسخ
 JSON_PAYLOAD=$(jq -n \
   --arg chat_id "<CHAT_ID_PLACEHOLDER>" \
   --arg text "✅ **تم بناء السيرفر بنجاح واحترافية!** 🚀🔥
@@ -306,6 +340,7 @@ class HealthCheckHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b"OK")
         else: self.send_response(404); self.end_headers()
+    def log_message(self, format, *args): pass
 
 def run_health_server():
     socketserver.TCPServer.allow_reuse_address = True
@@ -316,41 +351,134 @@ def run_health_server():
 threading.Thread(target=run_health_server, daemon=True).start()
 
 # ==========================================
-# 🚀 محرك المتصفح السريع (Anti-Crash Optimized)
+# 🚀 محرك المتصفح المحصّن (Anti-Crash V2)
 # ==========================================
 display = Display(visible=0, size=(1280, 800))
 display.start()
 
+def kill_zombie_chrome():
+    """قتل جميع عمليات Chrome/ChromeDriver الميتة لتحرير الذاكرة"""
+    try:
+        subprocess.run(['pkill', '-9', '-f', 'chrome'], timeout=5, 
+                       capture_output=True, stderr=subprocess.DEVNULL)
+    except: pass
+    try:
+        subprocess.run(['pkill', '-9', '-f', 'chromedriver'], timeout=5, 
+                       capture_output=True, stderr=subprocess.DEVNULL)
+    except: pass
+    time.sleep(2)
+
 def get_driver():
-    options = Options()
-    options.add_argument('--headless=new')
-    options.add_argument('--incognito')
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage') # يمنع انهيار الذاكرة المشتركة
-    options.add_argument('--disable-gpu')
-    options.add_argument('--disable-software-rasterizer')
-    options.add_argument('--disable-features=site-per-process') # يقلل استهلاك الرام بشدة
-    options.add_argument('--js-flags=--max-old-space-size=512') # يحد من استهلاك الـ JS للذاكرة
-    options.add_argument('--window-size=1280,800')
-    options.add_argument('--disable-blink-features=AutomationControlled')
-    options.page_load_strategy = 'eager'
-    options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
-    options.add_experimental_option('useAutomationExtension', False)
-    options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
-    driver = webdriver.Chrome(options=options)
-    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"})
-    driver.set_page_load_timeout(45) # زيادة طفيفة لتفادي الانهيار مع الصفحات الثقيلة
-    return driver
+    """إنشاء متصفح مع نظام إعادة محاولة ثلاثي"""
+    max_retries = 3
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            if attempt > 1:
+                kill_zombie_chrome()
+                print(f"🔄 [Chrome] Retry attempt {attempt}/{max_retries}...")
+                time.sleep(3)
+            
+            options = Options()
+            options.add_argument('--headless=new')
+            options.add_argument('--incognito')
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--disable-gpu')
+            options.add_argument('--disable-software-rasterizer')
+            options.add_argument('--disable-extensions')
+            options.add_argument('--disable-background-networking')
+            options.add_argument('--disable-default-apps')
+            options.add_argument('--disable-sync')
+            options.add_argument('--disable-translate')
+            options.add_argument('--disable-hang-monitor')
+            options.add_argument('--disable-component-update')
+            options.add_argument('--disable-backgrounding-occluded-windows')
+            options.add_argument('--disable-renderer-backgrounding')
+            options.add_argument('--disable-background-timer-throttling')
+            options.add_argument('--disable-ipc-flooding-protection')
+            options.add_argument('--disable-features=site-per-process,VizDisplayCompositor,TranslateUI')
+            options.add_argument('--js-flags=--max-old-space-size=256')
+            options.add_argument('--window-size=1280,800')
+            options.add_argument('--disable-blink-features=AutomationControlled')
+            options.add_argument('--no-first-run')
+            options.add_argument('--no-zygote')
+            options.add_argument('--disk-cache-size=1')
+            options.add_argument('--media-cache-size=1')
+            options.page_load_strategy = 'eager'
+            options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
+            options.add_experimental_option('useAutomationExtension', False)
+            options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
+            
+            driver = webdriver.Chrome(options=options)
+            driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+                "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+            })
+            driver.set_page_load_timeout(120)
+            driver.set_script_timeout(30)
+            driver.implicitly_wait(3)
+            
+            print(f"✅ [Chrome] Driver created successfully on attempt {attempt}")
+            return driver
+            
+        except SessionNotCreatedException as e:
+            print(f"❌ [Chrome] Session creation failed (attempt {attempt}): {e}")
+            kill_zombie_chrome()
+        except WebDriverException as e:
+            print(f"❌ [Chrome] WebDriver error (attempt {attempt}): {e}")
+            kill_zombie_chrome()
+        except Exception as e:
+            print(f"❌ [Chrome] Unknown error (attempt {attempt}): {e}")
+            kill_zombie_chrome()
+    
+    raise Exception("فشل إنشاء المتصفح بعد 3 محاولات. الذاكرة قد تكون ممتلئة.")
+
+def safe_get(driver, url, timeout=120):
+    """تصفح آمن مع معالجة الأخطاء - يعيد True/False"""
+    try:
+        driver.set_page_load_timeout(timeout)
+        driver.get(url)
+        return True
+    except TimeoutException:
+        try:
+            driver.execute_script("window.stop();")
+        except: pass
+        return True
+    except (WebDriverException, NoSuchWindowException) as e:
+        error_str = str(e).lower()
+        if "tab crashed" in error_str or "not reachable" in error_str or "session" in error_str:
+            return False
+        try:
+            driver.execute_script("window.stop();")
+        except: pass
+        return True
+    except Exception:
+        return False
+
+def is_driver_alive(driver):
+    """فحص سريع: هل المتصفح لا يزال يعمل؟"""
+    try:
+        _ = driver.title
+        return True
+    except:
+        return False
+
+def force_kill_driver(driver):
+    """إغلاق المتصفح بالقوة مع تنظيف العمليات"""
+    if driver:
+        try: driver.quit()
+        except: pass
+    kill_zombie_chrome()
 
 def inject_cookies_safely(driver, cookies):
     if not cookies: return
     try:
-        driver.get("https://google.com/robots.txt")
+        safe_get(driver, "https://google.com/robots.txt", timeout=20)
         for c in cookies:
             if 'google.com' in c.get('domain', ''):
                 try: driver.add_cookie(c)
                 except: pass
-        driver.get("https://console.cloud.google.com/robots.txt")
+        safe_get(driver, "https://console.cloud.google.com/robots.txt", timeout=20)
         for c in cookies:
             if 'cloud.google.com' in c.get('domain', ''):
                 try: driver.add_cookie(c)
@@ -374,22 +502,22 @@ def update_live_stream(chat_id, msg_id, status_text, logs=None, driver=None, is_
     try:
         markup = InlineKeyboardMarkup().add(InlineKeyboardButton("🛑 إلغاء فوري", callback_data="abort_mission"))
         if is_photo:
-            if driver:
+            if driver and is_driver_alive(driver):
                 try:
                     image_data = driver.get_screenshot_as_png()
                     media = InputMediaPhoto(image_data, caption=final_text, parse_mode="Markdown")
                     bot.edit_message_media(chat_id=chat_id, message_id=msg_id, media=media, reply_markup=markup)
                     return
-                except Exception as e:
-                    pass 
-            bot.edit_message_caption(chat_id=chat_id, message_id=msg_id, caption=final_text, parse_mode="Markdown", reply_markup=markup)
+                except: pass 
+            try:
+                bot.edit_message_caption(chat_id=chat_id, message_id=msg_id, caption=final_text, parse_mode="Markdown", reply_markup=markup)
+            except: pass
         else:
             bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=final_text, parse_mode="Markdown", reply_markup=markup)
-    except Exception as e:
-        pass 
+    except: pass 
 
 # ==========================================
-# ⚙️ محرك الطابور الأساسي 
+# ⚙️ محرك الطابور الأساسي (Anti-Crash V2)
 # ==========================================
 def worker_loop():
     while True:
@@ -401,7 +529,7 @@ def worker_loop():
             task_queue.task_done()
             continue
             
-        update_session(chat_id, {'status': 'processing'})
+        update_session(chat_id, {'status': 'processing', 'interaction_time': time.time()})
         current_session = get_session(chat_id)
         
         ui_msg_id = current_session.get('ui_msg_id')
@@ -431,7 +559,9 @@ def worker_loop():
                     initial_state = "WAIT_DEPLOY"
                 sso_tried = False 
 
-            driver.get(target_url_to_load)
+            if not safe_get(driver, target_url_to_load):
+                raise WebDriverException("فشل تحميل الصفحة الأولى - المتصفح انهار")
+            
             state = initial_state
             cookies_tried = False
             
@@ -449,13 +579,26 @@ def worker_loop():
             loop_count = 0
             selection_timeout = 0
             project_id = saved_project_id if saved_project_id else ""
+            consecutive_errors = 0
             
             while get_session(chat_id).get('active') and loop_count < 250:
                 loop_count += 1
                 time.sleep(3) 
                 if not get_session(chat_id).get('active'): break
+                
+                # فحص صحة المتصفح كل دورة
+                if not is_driver_alive(driver):
+                    raise WebDriverException("المتصفح توقف عن الاستجابة أثناء التشغيل")
                     
-                current_url = driver.current_url
+                try:
+                    current_url = driver.current_url
+                except:
+                    consecutive_errors += 1
+                    if consecutive_errors >= 3:
+                        raise WebDriverException("فقدان الاتصال بالمتصفح بشكل متكرر")
+                    continue
+                
+                consecutive_errors = 0
                 current_session = get_session(chat_id)
 
                 if current_session.get('status') == 'waiting_credentials' or state == "WAIT_USER_SELECTION":
@@ -473,7 +616,11 @@ def worker_loop():
                         break
 
                 if 'accounts.google.com' in current_url:
-                    page_source_lower = driver.page_source.lower()
+                    try:
+                        page_source_lower = driver.page_source.lower()
+                    except:
+                        continue
+                        
                     if "couldn't sign you in" in page_source_lower or "domain admin" in page_source_lower or "admin for help" in page_source_lower:
                         try: bot.delete_message(chat_id, status_msg_id)
                         except: pass
@@ -487,7 +634,7 @@ def worker_loop():
                         if not sso_tried:
                             update_live_stream(chat_id, status_msg_id, "🔄 **جاري التحويل:**\nأحاول الدخول عبر رابط Qwiklabs الأصلي لتسريع العملية...", driver=driver, is_photo=is_status_photo)
                             sso_tried = True
-                            driver.get(url) 
+                            safe_get(driver, url) 
                             state = "INIT"
                             time.sleep(2)
                             continue
@@ -495,7 +642,7 @@ def worker_loop():
                             update_live_stream(chat_id, status_msg_id, "⚡ **استعادة ذكية:**\nجاري حقن الكوكيز السابقة لتخطي تسجيل الدخول...", driver=driver, is_photo=is_status_photo)
                             inject_cookies_safely(driver, saved_cookies)
                             cookies_tried = True
-                            driver.get(target_url_to_load) 
+                            safe_get(driver, target_url_to_load) 
                             state = initial_state
                             time.sleep(2)
                             continue
@@ -549,12 +696,16 @@ def worker_loop():
                     if current_session.get('selected_region') and current_session.get('protocol'):
                         selected_reg = current_session.get('selected_region')
                         if project_id:
-                            driver.get(f"https://shell.cloud.google.com/?enableapi=true&project={project_id}&pli=1&show=terminal")
+                            safe_get(driver, f"https://shell.cloud.google.com/?enableapi=true&project={project_id}&pli=1&show=terminal")
                             state = "AUTHORIZE_SHELL" 
                     continue
                     
                 elif state == "SILENT_BUILD":
-                    page_source = driver.page_source
+                    try:
+                        page_source = driver.page_source
+                    except:
+                        continue
+                        
                     if "ERROR_DEPLOYMENT_FAILED_OCX_CATCH" in page_source:
                         try: bot.delete_message(chat_id, status_msg_id)
                         except: pass
@@ -563,7 +714,10 @@ def worker_loop():
                     sync_match = re.search(r'OCX_DATA_SYNC:\s*(.*?)\|(.*?)\|(.*?)\|(.*?)(?:\n|<)', page_source)
                     if sync_match:
                          s_name, s_reg, s_proto, _ = sync_match.groups()
-                         final_cookies = driver.get_cookies()
+                         try:
+                             final_cookies = driver.get_cookies()
+                         except:
+                             final_cookies = []
                          save_successful_server(chat_id, url, s_name, s_reg, s_proto, project_id, final_cookies)
 
                     if "SUCCESS_OCX_FINISH" in page_source:
@@ -616,14 +770,13 @@ def worker_loop():
                                 update_server_cookies(url, fresh_cookies)
                                 update_live_stream(chat_id, status_msg_id, "🟢 **سجل العمليات المباشر:**\n🔐 تم الوصول بنجاح. تم حفظ الكوكيز في القاعدة.", driver=driver, is_photo=is_status_photo)
                                 time.sleep(1)
-                            except Exception as e:
-                                pass
+                            except: pass
                             
                             if current_session.get('replace_mode'):
-                                driver.get(f"https://shell.cloud.google.com/?enableapi=true&project={project_id}&pli=1&show=terminal")
+                                safe_get(driver, f"https://shell.cloud.google.com/?enableapi=true&project={project_id}&pli=1&show=terminal")
                                 state = "AUTHORIZE_SHELL" 
                             else:
-                                driver.get(f"https://console.cloud.google.com/run/services?project={project_id}")
+                                safe_get(driver, f"https://console.cloud.google.com/run/services?project={project_id}")
                                 state = "WAIT_DEPLOY" 
                             
                 elif state == "WAIT_DEPLOY":
@@ -644,7 +797,9 @@ def worker_loop():
                             time.sleep(1) 
                             driver.execute_script("arguments[0].click();", region_elem)
                             state = "EXTRACT_REGIONS" 
-                    except: driver.execute_script("window.scrollBy(0, 300);")
+                    except:
+                        try: driver.execute_script("window.scrollBy(0, 300);")
+                        except: pass
                         
                 elif state == "EXTRACT_REGIONS":
                     if current_session.get('replace_mode'):
@@ -687,7 +842,8 @@ def worker_loop():
                             update_session(chat_id, {'ui_msg_id': msg.message_id, 'interaction_time': time.time()})
                             state = "WAIT_USER_SELECTION"
                         else:
-                            driver.execute_script("document.body.click();") 
+                            try: driver.execute_script("document.body.click();")
+                            except: pass 
                             time.sleep(1)
                             try:
                                 current_val = driver.find_element(By.XPATH, "//*[contains(text(), 'Region')]/following::*[@role='combobox'][1]")
@@ -735,14 +891,18 @@ def worker_loop():
                     }
                     return false;
                     """
-                    if driver.execute_script(js_fast_click):
-                        state = "WAIT_TERMINAL_BOOT"
+                    try:
+                        if driver.execute_script(js_fast_click):
+                            state = "WAIT_TERMINAL_BOOT"
+                    except: pass
 
                 elif state == "WAIT_TERMINAL_BOOT":
                     js_check_term = "function checkTerm(root){if(root.querySelector('textarea.xterm-helper-textarea'))return true;for(let f of root.querySelectorAll('iframe')){try{if(checkTerm(f.contentDocument))return true;}catch(e){}}return false;} return checkTerm(document);"
-                    if driver.execute_script(js_check_term):
-                        time.sleep(1) 
-                        state = "INJECT_PAYLOAD"
+                    try:
+                        if driver.execute_script(js_check_term):
+                            time.sleep(1) 
+                            state = "INJECT_PAYLOAD"
+                    except: pass
 
                 elif state == "INJECT_PAYLOAD":
                     update_live_stream(chat_id, status_msg_id, "تثبيت النواة الأساسية", "[الأنظمة] جاري حقن كود OCX المزدوج الذكي...", driver=driver, is_photo=is_status_photo)
@@ -789,13 +949,17 @@ def worker_loop():
                     }
                     return pasteToTerminal(document, arguments[0]);
                     """
-                    success = driver.execute_script(js_inject, cmd_payload)
-                    if success:
-                        time.sleep(1)
-                        try: ActionChains(driver).send_keys(Keys.ENTER).perform() 
+                    try:
+                        success = driver.execute_script(js_inject, cmd_payload)
+                        if success:
+                            time.sleep(1)
+                            try: ActionChains(driver).send_keys(Keys.ENTER).perform() 
+                            except: pass
+                        else:
+                            ActionChains(driver).send_keys(cmd_payload).send_keys(Keys.ENTER).perform()
+                    except:
+                        try: ActionChains(driver).send_keys(cmd_payload).send_keys(Keys.ENTER).perform()
                         except: pass
-                    else:
-                        ActionChains(driver).send_keys(cmd_payload).send_keys(Keys.ENTER).perform()
                     
                     state = "SILENT_BUILD"
                     
@@ -807,16 +971,19 @@ def worker_loop():
             try: bot.delete_message(chat_id, status_msg_id)
             except: pass
             
-            # معالجة الخطأ المزعج بذكاء (Tab Crashed)
             error_msg = str(e).lower()
-            if "tab crashed" in error_msg or "out of memory" in error_msg:
-                bot.send_message(chat_id, "⚠️ **تنبيه استهلاك الذاكرة:**\nواجه متصفح البوت ضغطاً كبيراً في الذاكرة أثناء المعالجة (Tab Crashed).\n\n💡 **الحل:** تم تنظيف الجلسة تلقائياً. يرجى إرسال الرابط مرة أخرى.", parse_mode="Markdown")
+            if "tab crashed" in error_msg or "out of memory" in error_msg or "renderer" in error_msg:
+                bot.send_message(chat_id, "⚠️ **تنبيه استهلاك الذاكرة:**\nواجه المتصفح ضغطاً كبيراً في الذاكرة.\n\n💡 **الحل:** تم تنظيف الجلسة تلقائياً. أعد إرسال الرابط مرة أخرى وسيتم إنشاء متصفح جديد.", parse_mode="Markdown")
+            elif "فشل إنشاء المتصفح" in str(e) or "session not created" in error_msg:
+                bot.send_message(chat_id, "⚠️ **تعذر تشغيل المتصفح:**\nتم استنزاف ذاكرة السيرفر بالكامل.\n\n💡 **الحل:** انتظر دقيقة واحدة ثم أعد إرسال الرابط. تم تنظيف جميع العمليات القديمة.", parse_mode="Markdown")
+            elif "فقدان الاتصال" in str(e) or "المتصفح توقف" in str(e):
+                bot.send_message(chat_id, "⚠️ **انقطع الاتصال بالمتصفح أثناء العمل.**\n\n💡 تم التنظيف تلقائياً. أعد إرسال الرابط.", parse_mode="Markdown")
             else:
-                bot.send_message(chat_id, f"❌ **حدث خطأ داخلي غير متوقع:**\n`{str(e)[:150]}`", parse_mode="Markdown")
+                bot.send_message(chat_id, "⚠️ **حدث خطأ أثناء المعالجة.**\n\n💡 تم تنظيف الجلسة. أعد إرسال الرابط مرة أخرى.", parse_mode="Markdown")
+            
+            print(f"❌ [Worker Error] Chat {chat_id}: {e}")
         finally:
-            if driver:
-                try: driver.quit()
-                except: pass
+            force_kill_driver(driver)
             clear_session(chat_id)
             task_queue.task_done()
 
@@ -1051,7 +1218,7 @@ def handle_query(call):
         markup.add(*[InlineKeyboardButton(text=c, callback_data=f"cont_{c}") for c in grouped_regions.keys()])
         bot.edit_message_text("👇 الرجاء اختيار القارة لتحديد السيرفر:", chat_id=chat_id, message_id=call.message.message_id, reply_markup=markup)
 
-@bot.message_handler(func=lambda message: message.text.startswith('http'))
+@bot.message_handler(func=lambda message: message.text and message.text.startswith('http'))
 def handle_url(message):
     chat_id = message.chat.id
     url = message.text
@@ -1086,7 +1253,7 @@ def handle_url(message):
         return
 
     msg = bot.send_message(chat_id, "⏳ **تمت الإضافة للطابور بنجاح...**\nسيتم البدء فور توفر الموارد.", parse_mode="Markdown")
-    update_session(chat_id, {'active': True, 'status': 'queued', 'target_url': url, 'ui_msg_id': msg.message_id})
+    update_session(chat_id, {'active': True, 'status': 'queued', 'target_url': url, 'ui_msg_id': msg.message_id, 'interaction_time': time.time()})
     task_queue.put({'chat_id': chat_id, 'url': url})
 
 @bot.message_handler(func=lambda message: True, content_types=['text', 'photo', 'video', 'document', 'audio', 'sticker', 'voice'])
@@ -1098,9 +1265,12 @@ def delete_spam_and_unrelated_messages(message):
         pass
 
 if __name__ == "__main__":
-    print("💎 OCX PRO SYSTEM IS ACTIVE & READY...")
+    print("💎 OCX PRO SYSTEM V2 (Anti-Crash) IS ACTIVE & READY...")
+    kill_zombie_chrome()
     try: bot.remove_webhook()
     except: pass
     while True:
         try: bot.polling(none_stop=True)
-        except Exception as e: time.sleep(3)
+        except Exception as e:
+            print(f"❌ [Polling Error] {e}")
+            time.sleep(3)
