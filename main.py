@@ -54,9 +54,6 @@ worker_thread = None
 if ADMIN_ID and not USE_MONGO:
     ram_vips.add(str(ADMIN_ID))
 
-# ==========================================
-# ☠️ قاتل Chrome + Swap
-# ==========================================
 def nuke_all_chrome():
     for p in ['chrome', 'chromium', 'chromedriver', 'google-chrome']:
         try: subprocess.run(['pkill', '-9', '-f', p], timeout=5, capture_output=True)
@@ -76,9 +73,6 @@ def setup_swap():
 setup_swap()
 nuke_all_chrome()
 
-# ==========================================
-# 🧹 تنظيف الكوكيز كل 12 ساعة
-# ==========================================
 def cookie_cleanup_worker():
     while True:
         time.sleep(12 * 60 * 60)
@@ -90,9 +84,6 @@ def cookie_cleanup_worker():
 
 threading.Thread(target=cookie_cleanup_worker, daemon=True).start()
 
-# ==========================================
-# 🐕 حارس الجلسات المعلقة (15 دقيقة)
-# ==========================================
 def session_watchdog():
     while True:
         time.sleep(300)
@@ -103,7 +94,7 @@ def session_watchdog():
                     if lt and (time.time() - lt > 900):
                         cid = s.get('chat_id')
                         clear_session(cid)
-                        try: bot.send_message(cid, "⏳ **انتهت الجلسة تلقائياً (15 دقيقة بدون نشاط).**\nأعد إرسال الرابط.", parse_mode="Markdown")
+                        try: bot.send_message(cid, "⏳ **انتهت الجلسة تلقائياً (15 دقيقة).**\nأعد إرسال الرابط.", parse_mode="Markdown")
                         except: pass
             else:
                 for cid, s in list(users_col.items()):
@@ -113,9 +104,6 @@ def session_watchdog():
 
 threading.Thread(target=session_watchdog, daemon=True).start()
 
-# ==========================================
-# 🛡️ نظام VIP
-# ==========================================
 def is_vip(uid):
     sid = str(uid)
     if sid == str(ADMIN_ID): return True
@@ -145,9 +133,6 @@ def send_unauthorized_msg(cid):
     msg = bot.send_message(cid, "⛔️ **عذراً، أنت غير مشترك.**\n\nللاشتراك تواصل مع الإدارة.", reply_markup=mk, parse_mode="Markdown")
     update_session(cid, {'unauth_msg_id': msg.message_id})
 
-# ==========================================
-# ⚙️ إدارة الجلسات (مع Task ID)
-# ==========================================
 def get_session(cid):
     try:
         if USE_MONGO:
@@ -201,9 +186,6 @@ def update_server_cookies(url, cookies):
             servers_col[url]['cookies'] = cookies
     except: pass
 
-# ==========================================
-# 💀 السكربت المولد
-# ==========================================
 VPN_SCRIPT_TEMPLATE = r"""#!/bin/bash
 PROJECT_ID=$(gcloud config get-value project)
 PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format="value(projectNumber)")
@@ -299,15 +281,160 @@ curl -s -X POST "https://api.telegram.org/bot<BOT_TOKEN_PLACEHOLDER>/sendMessage
 echo "SUCCESS_OCX_FINISH"
 """
 
+# ==========================================
+# 🌍 ترجمة المناطق (شاملة - بدون أعلام بيضاء)
+# ==========================================
 def translate_region(name):
-    t = {'Netherlands': 'هولندا 🇳🇱', 'South Carolina': 'ساوث كارولينا 🇺🇸', 'Oregon': 'أوريغون 🇺🇸', 'Iowa': 'آيوا 🇺🇸', 'Belgium': 'بلجيكا 🇧🇪', 'London': 'لندن 🇬🇧', 'Frankfurt': 'فرانكفورت 🇩🇪', 'Taiwan': 'تايوان 🇹🇼', 'Tokyo': 'طوكيو 🇯🇵', 'Singapore': 'سنغافورة 🇸🇬', 'Sydney': 'سيدني 🇦🇺', 'Mumbai': 'مومباي 🇮🇳', 'Oslo': 'أوسلو 🇳🇴', 'Finland': 'فنلندا 🇫🇮', 'Montreal': 'مونتريال 🇨🇦', 'Toronto': 'تورونتو 🇨🇦', 'Sao Paulo': 'ساو باولو 🇧🇷', 'Jakarta': 'جاكرتا 🇮🇩', 'Las Vegas': 'لاس فيغاس 🇺🇸', 'Los Angeles': 'لوس أنجلوس 🇺🇸', 'Northern Virginia': 'فرجينيا 🇺🇸', 'Salt Lake City': 'سولت ليك 🇺🇸', 'Seoul': 'سيول 🇰🇷', 'Zurich': 'زيورخ 🇨🇭', 'Milan': 'ميلانو 🇮🇹', 'Madrid': 'مدريد 🇪🇸', 'Paris': 'باريس 🇫🇷', 'Warsaw': 'وارسو 🇵🇱'}
-    for k, v in t.items():
-        if k.lower() in name.lower(): return v
-    return f"{name} 🏳️"
+    translations = {
+        'South Carolina': 'ساوث كارولينا 🇺🇸',
+        'Moncks Corner': 'ساوث كارولينا 🇺🇸',
+        'Oregon': 'أوريغون 🇺🇸',
+        'The Dalles': 'أوريغون 🇺🇸',
+        'Portland': 'بورتلاند 🇺🇸',
+        'Iowa': 'آيوا 🇺🇸',
+        'Council Bluffs': 'آيوا 🇺🇸',
+        'Las Vegas': 'لاس فيغاس 🇺🇸',
+        'Los Angeles': 'لوس أنجلوس 🇺🇸',
+        'Northern Virginia': 'فرجينيا 🇺🇸',
+        'Ashburn': 'فرجينيا 🇺🇸',
+        'Salt Lake City': 'سولت ليك سيتي 🇺🇸',
+        'Columbus': 'كولومبوس 🇺🇸',
+        'Dallas': 'دالاس 🇺🇸',
+        'Montreal': 'مونتريال 🇨🇦',
+        'Toronto': 'تورونتو 🇨🇦',
+        'Queretaro': 'كيريتارو 🇲🇽',
+        'Querétaro': 'كيريتارو 🇲🇽',
+        'Sao Paulo': 'ساو باولو 🇧🇷',
+        'São Paulo': 'ساو باولو 🇧🇷',
+        'Osasco': 'ساو باولو 🇧🇷',
+        'Santiago': 'سانتياغو 🇨🇱',
+        'Bogota': 'بوغوتا 🇨🇴',
+        'Bogotá': 'بوغوتا 🇨🇴',
+        'Buenos Aires': 'بوينس آيرس 🇦🇷',
+        'London': 'لندن 🇬🇧',
+        'Belgium': 'بلجيكا 🇧🇪',
+        'St. Ghislain': 'بلجيكا 🇧🇪',
+        'Netherlands': 'هولندا 🇳🇱',
+        'Eemshaven': 'هولندا 🇳🇱',
+        'Frankfurt': 'فرانكفورت 🇩🇪',
+        'Berlin': 'برلين 🇩🇪',
+        'Munich': 'ميونخ 🇩🇪',
+        'Hanau': 'فرانكفورت 🇩🇪',
+        'Paris': 'باريس 🇫🇷',
+        'Marseille': 'مارسيليا 🇫🇷',
+        'Madrid': 'مدريد 🇪🇸',
+        'Milan': 'ميلانو 🇮🇹',
+        'Turin': 'تورينو 🇮🇹',
+        'Rome': 'روما 🇮🇹',
+        'Warsaw': 'وارسو 🇵🇱',
+        'Zurich': 'زيورخ 🇨🇭',
+        'Zürich': 'زيورخ 🇨🇭',
+        'Geneva': 'جنيف 🇨🇭',
+        'Finland': 'فنلندا 🇫🇮',
+        'Hamina': 'فنلندا 🇫🇮',
+        'Helsinki': 'هلسنكي 🇫🇮',
+        'Oslo': 'أوسلو 🇳🇴',
+        'Stockholm': 'ستوكهولم 🇸🇪',
+        'Copenhagen': 'كوبنهاغن 🇩🇰',
+        'Dublin': 'دبلن 🇮🇪',
+        'Bucharest': 'بوخارست 🇷🇴',
+        'Vienna': 'فيينا 🇦🇹',
+        'Prague': 'براغ 🇨🇿',
+        'Budapest': 'بودابست 🇭🇺',
+        'Lisbon': 'لشبونة 🇵🇹',
+        'Athens': 'أثينا 🇬🇷',
+        'Brussels': 'بروكسل 🇧🇪',
+        'Amsterdam': 'أمستردام 🇳🇱',
+        'Tokyo': 'طوكيو 🇯🇵',
+        'Osaka': 'أوساكا 🇯🇵',
+        'Singapore': 'سنغافورة 🇸🇬',
+        'Jurong West': 'سنغافورة 🇸🇬',
+        'Taiwan': 'تايوان 🇹🇼',
+        'Changhua County': 'تايوان 🇹🇼',
+        'Changhua': 'تايوان 🇹🇼',
+        'Hong Kong': 'هونغ كونغ 🇭🇰',
+        'Seoul': 'سيول 🇰🇷',
+        'Mumbai': 'مومباي 🇮🇳',
+        'Delhi': 'دلهي 🇮🇳',
+        'Jakarta': 'جاكرتا 🇮🇩',
+        'Kuala Lumpur': 'كوالالمبور 🇲🇾',
+        'Bangkok': 'بانكوك 🇹🇭',
+        'Tel Aviv': 'تل أبيب 🇮🇱',
+        'Doha': 'الدوحة 🇶🇦',
+        'Dammam': 'الدمام 🇸🇦',
+        'Riyadh': 'الرياض 🇸🇦',
+        'Jeddah': 'جدة 🇸🇦',
+        'Dubai': 'دبي 🇦🇪',
+        'Abu Dhabi': 'أبوظبي 🇦🇪',
+        'Muscat': 'مسقط 🇴🇲',
+        'Kuwait': 'الكويت 🇰🇼',
+        'Bahrain': 'البحرين 🇧🇭',
+        'Sydney': 'سيدني 🇦🇺',
+        'Melbourne': 'ملبورن 🇦🇺',
+        'Auckland': 'أوكلاند 🇳🇿',
+        'Johannesburg': 'جوهانسبرغ 🇿🇦',
+        'Cape Town': 'كيب تاون 🇿🇦',
+        'Lagos': 'لاغوس 🇳🇬',
+        'Nairobi': 'نيروبي 🇰🇪',
+        'Cairo': 'القاهرة 🇪🇬',
+        'Casablanca': 'الدار البيضاء 🇲🇦',
+    }
 
-# ==========================================
-# Health Check
-# ==========================================
+    for key, val in translations.items():
+        if key.lower() in name.lower():
+            return val
+
+    region_id_map = {
+        'europe-north1': 'فنلندا 🇫🇮',
+        'europe-north2': 'ستوكهولم 🇸🇪',
+        'europe-west1': 'بلجيكا 🇧🇪',
+        'europe-west2': 'لندن 🇬🇧',
+        'europe-west3': 'فرانكفورت 🇩🇪',
+        'europe-west4': 'هولندا 🇳🇱',
+        'europe-west6': 'زيورخ 🇨🇭',
+        'europe-west8': 'ميلانو 🇮🇹',
+        'europe-west9': 'باريس 🇫🇷',
+        'europe-west10': 'برلين 🇩🇪',
+        'europe-west12': 'تورينو 🇮🇹',
+        'europe-southwest1': 'مدريد 🇪🇸',
+        'europe-central2': 'وارسو 🇵🇱',
+        'us-central1': 'آيوا 🇺🇸',
+        'us-east1': 'ساوث كارولينا 🇺🇸',
+        'us-east4': 'فرجينيا 🇺🇸',
+        'us-east5': 'كولومبوس 🇺🇸',
+        'us-west1': 'أوريغون 🇺🇸',
+        'us-west2': 'لوس أنجلوس 🇺🇸',
+        'us-west3': 'سولت ليك سيتي 🇺🇸',
+        'us-west4': 'لاس فيغاس 🇺🇸',
+        'us-south1': 'دالاس 🇺🇸',
+        'northamerica-northeast1': 'مونتريال 🇨🇦',
+        'northamerica-northeast2': 'تورونتو 🇨🇦',
+        'northamerica-south1': 'كيريتارو 🇲🇽',
+        'southamerica-east1': 'ساو باولو 🇧🇷',
+        'southamerica-west1': 'سانتياغو 🇨🇱',
+        'asia-east1': 'تايوان 🇹🇼',
+        'asia-east2': 'هونغ كونغ 🇭🇰',
+        'asia-northeast1': 'طوكيو 🇯🇵',
+        'asia-northeast2': 'أوساكا 🇯🇵',
+        'asia-northeast3': 'سيول 🇰🇷',
+        'asia-south1': 'مومباي 🇮🇳',
+        'asia-south2': 'دلهي 🇮🇳',
+        'asia-southeast1': 'سنغافورة 🇸🇬',
+        'asia-southeast2': 'جاكرتا 🇮🇩',
+        'australia-southeast1': 'سيدني 🇦🇺',
+        'australia-southeast2': 'ملبورن 🇦🇺',
+        'me-west1': 'تل أبيب 🇮🇱',
+        'me-central1': 'الدوحة 🇶🇦',
+        'me-central2': 'الدمام 🇸🇦',
+        'africa-south1': 'جوهانسبرغ 🇿🇦',
+    }
+
+    for rid, val in region_id_map.items():
+        if rid in name.lower():
+            return val
+
+    return f"{name} 🌍"
+
 class HCHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200 if self.path == '/health' else 404)
@@ -320,9 +447,6 @@ def run_hc():
     with socketserver.TCPServer(("", int(os.environ.get("PORT", 8080))), HCHandler) as h: h.serve_forever()
 threading.Thread(target=run_hc, daemon=True).start()
 
-# ==========================================
-# 🚀 Chrome Engine V5
-# ==========================================
 display = Display(visible=0, size=(800, 600))
 display.start()
 
@@ -447,9 +571,6 @@ def uls(cid, mid, text, logs=None, driver=None, is_photo=False):
             except: pass
     except: pass
 
-# ==========================================
-# ⚙️ محرك المهام
-# ==========================================
 R_OK = "SUCCESS"
 R_RETRY = "RETRY"
 R_ABORT = "ABORT"
@@ -506,12 +627,10 @@ def run_single_task(chat_id, url, task_id, attempt_num):
             lc += 1
             time.sleep(3)
 
-            # === فحص Task ID (حل Race Condition) ===
             if not is_task_current(chat_id, task_id):
                 sdm(chat_id, status_msg_id)
                 return R_ABORT
 
-            # === فحص حياة المتصفح ===
             if not alive(driver):
                 dead += 1
                 if dead >= 3:
@@ -520,7 +639,6 @@ def run_single_task(chat_id, url, task_id, attempt_num):
                 time.sleep(2); continue
             dead = 0
 
-            # === تنظيف ذاكرة ===
             if lc % 20 == 0:
                 safe_exec(driver, "try{performance.clearResourceTimings();}catch(e){}")
 
@@ -529,10 +647,6 @@ def run_single_task(chat_id, url, task_id, attempt_num):
 
             cs = get_session(chat_id)
 
-            # ============================================
-            # ⏳ نظام 90 ثانية - إلغاء عند عدم التفاعل
-            # يعمل فقط عندما البوت ينتظر المستخدم
-            # ============================================
             user_waiting = (state == "WAIT_USER_SELECTION" or cs.get('status') == 'waiting_credentials')
 
             if user_waiting:
@@ -548,12 +662,6 @@ def run_single_task(chat_id, url, task_id, attempt_num):
                         parse_mode="Markdown")
                     return R_ABORT
 
-            # ============================================
-            # ❌ لا نحدّث interaction_time هنا أبداً!
-            # يتحدث فقط عند ضغط المستخدم على زر
-            # ============================================
-
-            # === صفحة تسجيل الدخول ===
             if 'accounts.google.com' in cur_url:
                 pl = safe_source(driver).lower()
                 if "couldn't sign you in" in pl or "domain admin" in pl or "admin for help" in pl:
@@ -578,7 +686,6 @@ def run_single_task(chat_id, url, task_id, attempt_num):
                     elif cs.get('status') != 'waiting_credentials' and not cs.get('email'):
                         sdm(chat_id, status_msg_id)
                         msg = bot.send_message(chat_id, "⚠️ **مطلوب بيانات الدخول.**\n\n`student-02-xxx@qwiklabs.net Password123`", parse_mode="Markdown")
-                        # ✅ نحدث interaction_time هنا لأن المستخدم يجب أن يتفاعل
                         update_session(chat_id, {'status': 'waiting_credentials', 'ui_msg_id': msg.message_id, 'interaction_time': time.time()})
                         status_msg_id = msg.message_id; continue
 
@@ -602,7 +709,6 @@ def run_single_task(chat_id, url, task_id, attempt_num):
 
                 if cs.get('status') == 'waiting_credentials': continue
 
-            # === حالات الآلة ===
             if state == "WAIT_USER_SELECTION":
                 if cs.get('selected_region') and cs.get('protocol'):
                     if pid:
@@ -624,7 +730,6 @@ def run_single_task(chat_id, url, task_id, attempt_num):
                 am = {"INIT": "التهيئة", "WAIT_DEPLOY": "واجهة البناء", "WAIT_REGION": "خريطة السيرفرات", "EXTRACT_REGIONS": "استخراج البيانات", "AUTHORIZE_SHELL": "تفويض الطرفية", "WAIT_TERMINAL_BOOT": "تشغيل Linux", "INJECT_PAYLOAD": "حقن السكربت"}
                 uls(chat_id, status_msg_id, f"🟢 المرحلة: `{am.get(state, state)}`", driver=driver, is_photo=is_photo)
 
-            # === أزرار الموافقة ===
             try:
                 for btn in safe_find(driver, By.XPATH, "//button[contains(.,'Agree and continue') or contains(.,'موافق ومتابعة') or contains(.,'Akkoord en doorgaan')]"):
                     if btn.is_displayed():
@@ -701,7 +806,6 @@ def run_single_task(chat_id, url, task_id, attempt_num):
                     mk = InlineKeyboardMarkup(row_width=2)
                     mk.add(*[InlineKeyboardButton(text=c, callback_data=f"cont_{c}") for c in gr.keys()])
                     msg = bot.send_message(chat_id, "📍 **تم جلب السيرفرات!**\n\n👇 اختر القارة:", reply_markup=mk, parse_mode="Markdown")
-                    # ✅ هنا نبدأ عداد الـ 90 ثانية
                     update_session(chat_id, {'ui_msg_id': msg.message_id, 'interaction_time': time.time()})
                     state = "WAIT_USER_SELECTION"
                 else:
@@ -776,21 +880,16 @@ def run_single_task(chat_id, url, task_id, attempt_num):
     finally:
         destroy_driver(driver)
 
-# ==========================================
-# 🔄 Worker Loop
-# ==========================================
 def worker_loop():
     while True:
         task = None
-        try:
-            task = task_queue.get(timeout=30)
+        try: task = task_queue.get(timeout=30)
         except queue.Empty: continue
         except: continue
 
         try:
             cid = task['chat_id']; url = task['url']; tid = task['task_id']
-            if not is_task_current(cid, tid):
-                print(f"⏭️ Skip stale {tid}"); continue
+            if not is_task_current(cid, tid): continue
 
             update_session(cid, {'status': 'processing', 'interaction_time': time.time()})
             sdm(cid, get_session(cid).get('ui_msg_id'))
@@ -810,20 +909,19 @@ def worker_loop():
                 if r == R_OK: break
                 elif r == R_ABORT: break
                 elif r == R_RETRY and att >= 3:
-                    try: bot.send_message(cid, "❌ **فشلت 3 محاولات.**\n💡 انتظر 30 ثانية وأعد إرسال الرابط.", parse_mode="Markdown")
+                    try: bot.send_message(cid, "❌ **فشلت 3 محاولات.**\n💡 انتظر 30 ثانية وأعد الرابط.", parse_mode="Markdown")
                     except: pass
 
         except Exception as e:
             print(f"❌ [Worker FATAL] {e}")
             if task:
-                try: bot.send_message(task['chat_id'], "⚠️ خطأ. أعد إرسال الرابط.", parse_mode="Markdown")
+                try: bot.send_message(task['chat_id'], "⚠️ خطأ. أعد الرابط.", parse_mode="Markdown")
                 except: pass
         finally:
             if task:
                 try:
                     cur = get_session(task['chat_id'])
-                    if cur.get('task_id') == task['task_id']:
-                        clear_session(task['chat_id'])
+                    if cur.get('task_id') == task['task_id']: clear_session(task['chat_id'])
                 except: pass
                 try: task_queue.task_done()
                 except: pass
@@ -836,13 +934,10 @@ def start_worker():
 def ensure_worker():
     global worker_thread
     if worker_thread is None or not worker_thread.is_alive():
-        print("🔄 [Worker] Restarting..."); nuke_all_chrome(); start_worker()
+        nuke_all_chrome(); start_worker()
 
 start_worker()
 
-# ==========================================
-# 🎛️ واجهة المستخدم
-# ==========================================
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
     cid = message.chat.id
@@ -931,7 +1026,6 @@ def handle_creds(msg):
     if em:
         email = em.group(0); pw = t.replace(email, '').strip()
         if pw:
-            # ✅ تحديث interaction_time عند تفاعل المستخدم
             update_session(cid, {'email': email, 'password': pw, 'status': 'processing', 'interaction_time': time.time()})
             try: bot.delete_message(cid, msg.message_id)
             except: pass
@@ -946,8 +1040,6 @@ def handle_query(call):
         except: pass; return
 
     session = get_session(cid)
-
-    # ✅✅✅ هنا فقط يتحدث interaction_time - عند ضغط المستخدم فعلاً
     update_session(cid, {'interaction_time': time.time()})
 
     if data == "cancel_ui":
