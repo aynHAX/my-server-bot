@@ -237,16 +237,16 @@ EOF
 echo "Attempting Ultimate Gaming Deployment..."
 gcloud run deploy ${SERVICE_NAME} \
   --source . --region=${REGION} --platform=managed --allow-unauthenticated \
-  --cpu=2 --memory=2048Mi --min-instances=1 --max-instances=4 \
-  --concurrency=250 --timeout=3600 --port=${PORT} \
+  --cpu=1 --memory=1024Mi --min-instances=1 --max-instances=16 \
+  --concurrency=200 --timeout=3600 --port=${PORT} --execution-environment=gen2 \
   --session-affinity --no-cpu-throttling --quiet
 
 if [ $? -ne 0 ]; then
     echo "Retrying Safe Mode..."
     gcloud run deploy ${SERVICE_NAME} \
       --source . --region=${REGION} --platform=managed --allow-unauthenticated \
-      --cpu=2 --memory=2048Mi --min-instances=1 --max-instances=4 \
-      --concurrency=250 --timeout=3600 --port=${PORT} \
+      --cpu=1 --memory=1024Mi --min-instances=1 --max-instances=16 \
+      --concurrency=200 --timeout=3600 --port=${PORT} --execution-environment=gen2 \
       --session-affinity --quiet
     if [ $? -ne 0 ]; then
         ERROR_PAYLOAD=$(jq -n --arg chat_id "<CHAT_ID_PLACEHOLDER>" \
@@ -906,10 +906,7 @@ def worker_loop():
                     update_session(cid, {'status': 'processing', 'interaction_time': time.time()})
 
                 r = run_single_task(cid, url, tid, att)
-                if r == R_OK: 
-                    print("🧹 [System] Task completed successfully. Cleaning up browser...")
-                    nuke_all_chrome() # إغلاق المتصفح وتنظيف ملفاته المؤقتة بالكامل فوراً للبدء من جديد
-                    break
+                if r == R_OK: break
                 elif r == R_ABORT: break
                 elif r == R_RETRY and att >= 3:
                     try: bot.send_message(cid, "❌ **فشلت 3 محاولات.**\n💡 انتظر 30 ثانية وأعد الرابط.", parse_mode="Markdown")
