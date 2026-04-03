@@ -906,7 +906,10 @@ def worker_loop():
                     update_session(cid, {'status': 'processing', 'interaction_time': time.time()})
 
                 r = run_single_task(cid, url, tid, att)
-                if r == R_OK: break
+                if r == R_OK: 
+                    print("🧹 [System] Task completed successfully. Cleaning up browser...")
+                    nuke_all_chrome() # إغلاق المتصفح وتنظيف ملفاته المؤقتة بالكامل فوراً للبدء من جديد
+                    break
                 elif r == R_ABORT: break
                 elif r == R_RETRY and att >= 3:
                     try: bot.send_message(cid, "❌ **فشلت 3 محاولات.**\n💡 انتظر 30 ثانية وأعد الرابط.", parse_mode="Markdown")
