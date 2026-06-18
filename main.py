@@ -571,6 +571,63 @@ def uls(cid, mid, text, logs=None, driver=None, is_photo=False):
             except: pass
     except: pass
 
+# ═══════════════════════════════════════════════════════════════
+# 🔧 فحص الحظر المرئي — فقط innerText المرئي وليس page_source كامل
+# ═══════════════════════════════════════════════════════════════
+def is_account_actually_blocked(d):
+    """
+    يفحص النص المرئي فقط (innerText) وليس مصدر الصفحة كامل.
+    يتجاهل العناصر المخفية، السكربتات، والتعليقات.
+    """
+    try:
+        result = safe_exec(d, """
+            try {
+                var bodyText = document.body.innerText || '';
+                var lower = bodyText.toLowerCase();
+                
+                // فحص رسائل الخطأ المرئية فقط
+                if (lower.includes("couldn't sign you in") && lower.includes("domain admin")) {
+                    // تأكد إضافي: العنصر مرئي فعلاً
+                    var els = document.querySelectorAll('div, span, h1, h2, p, [role="alert"], [role="heading"]');
+                    for (var i = 0; i < els.length; i++) {
+                        var t = (els[i].innerText || '').trim().toLowerCase();
+                        var rect = els[i].getBoundingClientRect();
+                        var style = window.getComputedStyle(els[i]);
+                        if (t.includes("couldn't sign you in") && 
+                            rect.width > 0 && rect.height > 0 &&
+                            style.display !== 'none' && style.visibility !== 'hidden' &&
+                            parseFloat(style.opacity) > 0) {
+                            return true;
+                        }
+                    }
+                }
+                
+                // فحص "admin for help" فقط إذا كان مرئياً ولا يوجد حقل إدخال
+                var hasEmailInput = document.querySelector("input[type='email']");
+                var hasPasswordInput = document.querySelector("input[type='password']");
+                if (!hasEmailInput && !hasPasswordInput) {
+                    if (lower.includes("contact your domain admin") || lower.includes("admin for help")) {
+                        var els2 = document.querySelectorAll('div, span, [role="alert"]');
+                        for (var j = 0; j < els2.length; j++) {
+                            var t2 = (els2[j].innerText || '').trim().toLowerCase();
+                            var rect2 = els2[j].getBoundingClientRect();
+                            var style2 = window.getComputedStyle(els2[j]);
+                            if ((t2.includes("domain admin") || t2.includes("admin for help")) &&
+                                rect2.width > 0 && rect2.height > 0 &&
+                                style2.display !== 'none' && style2.visibility !== 'hidden') {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                
+                return false;
+            } catch(e) { return false; }
+        """)
+        return result == True
+    except:
+        return False
+
 R_OK = "SUCCESS"
 R_RETRY = "RETRY"
 R_ABORT = "ABORT"
@@ -591,7 +648,8 @@ def run_single_task(chat_id, url, task_id, attempt_num):
 
         turl = url
         istate = "INIT"
-        sso_tried = True
+        # 🔧 الإصلاح: sso_tried = False دائماً للروابط الجديدة
+        sso_tried = False
 
         if spid and (cs.get('replace_mode') or cs.get('add_new_mode')):
             if cs.get('replace_mode'):
@@ -605,9 +663,12 @@ def run_single_task(chat_id, url, task_id, attempt_num):
         if not safe_get(driver, turl):
             raise Exception("CHROME_CRASH")
 
+        # 🔧 انتظار أطول للتحميل/إعادة التوجيه
+        time.sleep(5)
+
         state = istate
         cook_tried = False
-        time.sleep(3)
+        sso_retry_count = 0
 
         mk = InlineKeyboardMarkup().add(InlineKeyboardButton("🛑 إلغاء فوري", callback_data="abort_mission"))
         rn = f"\n🔄 *(محاولة {attempt_num})*" if attempt_num > 1 else ""
@@ -622,6 +683,7 @@ def run_single_task(chat_id, url, task_id, attempt_num):
         lc = 0
         pid = spid or ""
         dead = 0
+        blocked_check_count = 0
 
         while lc < 300:
             lc += 1
@@ -662,43 +724,116 @@ def run_single_task(chat_id, url, task_id, attempt_num):
                         parse_mode="Markdown")
                     return R_ABORT
 
+            # ═══════════════════════════════════════════════════
+            # 🔧 معالجة accounts.google.com — منطق جديد بالكامل
+            # ═══════════════════════════════════════════════════
             if 'accounts.google.com' in cur_url:
-                pl = safe_source(driver).lower()
-                if "couldn't sign you in" in pl or "domain admin" in pl or "admin for help" in pl:
-                    sdm(chat_id, status_msg_id)
-                    bot.send_message(chat_id, "❌ **حساب محظور.**\n💡 أغلق اللاب وابدأ جديد.", parse_mode="Markdown")
-                    return R_ABORT
+                # انتظار قليل للصفحة
+                time.sleep(1)
 
                 ei = safe_find(driver, By.XPATH, "//input[@type='email']")
                 pi = safe_find(driver, By.XPATH, "//input[@type='password']")
 
-                if ei and ei[0].is_displayed() and not (pi and pi[0].is_displayed()):
+                email_visible = ei and len(ei) > 0 and ei[0].is_displayed()
+                password_visible = pi and len(pi) > 0 and pi[0].is_displayed()
+
+                # 🔧 فحص الحظر: فقط عندما لا يوجد حقل إدخال مرئي
+                # وإعادة محاولة SSO قبل إعلان الحظر
+                if not email_visible and not password_visible:
+                    if is_account_actually_blocked(driver):
+                        blocked_check_count += 1
+                        
+                        # 🔧 إعادة محاولة SSO قبل الحجز نهائياً
+                        if sso_retry_count < 2 and not sso_tried:
+                            sso_retry_count += 1
+                            sso_tried = True
+                            uls(chat_id, status_msg_id, f"🔄 **إعادة محاولة SSO ({sso_retry_count}/2)...**", driver=driver, is_photo=is_photo)
+                            time.sleep(2)
+                            if not safe_get(driver, url):
+                                sdm(chat_id, status_msg_id)
+                                return R_RETRY
+                            state = "INIT"
+                            time.sleep(5)
+                            continue
+                        elif sso_retry_count < 3 and scook and not cook_tried:
+                            sso_retry_count += 1
+                            cook_tried = True
+                            uls(chat_id, status_msg_id, "⚡ **حقن كوكيز محفوظة...**", driver=driver, is_photo=is_photo)
+                            inject_cookies_safely(driver, scook)
+                            time.sleep(2)
+                            if not safe_get(driver, turl):
+                                sdm(chat_id, status_msg_id)
+                                return R_RETRY
+                            state = istate
+                            time.sleep(5)
+                            continue
+                        else:
+                            # تأكيد أخير: انتظر 3 ثواني وأعد الفحص
+                            time.sleep(3)
+                            if is_account_actually_blocked(driver):
+                                sdm(chat_id, status_msg_id)
+                                bot.send_message(chat_id, "❌ **حساب محظور فعلاً.**\n💡 أغلق اللاب وابدأ جديد.", parse_mode="Markdown")
+                                return R_ABORT
+                            # إذا لم يعد محظور، تابع
+                            state = "INIT"
+                            continue
+                    else:
+                        # الصفحة لا تحتوي على خطأ مرئي ولا حقل إدخال
+                        # ممكن صفحة تحميل أو إعادة توجيه — انتظر
+                        if lc < 10:
+                            uls(chat_id, status_msg_id, "⏳ **انتظار إعادة توجيه...**", driver=driver, is_photo=is_photo)
+                            time.sleep(2)
+                            continue
+                        # بعد انتظار طويل، حاول SSO
+                        if not sso_tried:
+                            sso_tried = True
+                            uls(chat_id, status_msg_id, "🔄 **محاولة SSO...**", driver=driver, is_photo=is_photo)
+                            if not safe_get(driver, url):
+                                sdm(chat_id, status_msg_id)
+                                return R_RETRY
+                            state = "INIT"
+                            time.sleep(5)
+                            continue
+
+                # 🔧 منطق SSO/الكوكيز/بيانات الدخول
+                if email_visible and not password_visible:
                     if not sso_tried:
-                        uls(chat_id, status_msg_id, "🔄 **SSO...**", driver=driver, is_photo=is_photo)
+                        uls(chat_id, status_msg_id, "🔄 **محاولة SSO...**", driver=driver, is_photo=is_photo)
                         sso_tried = True
-                        if not safe_get(driver, url): sdm(chat_id, status_msg_id); return R_RETRY
-                        state = "INIT"; time.sleep(2); continue
+                        if not safe_get(driver, url):
+                            sdm(chat_id, status_msg_id)
+                            return R_RETRY
+                        state = "INIT"
+                        time.sleep(4)
+                        continue
                     elif not cook_tried and scook:
                         uls(chat_id, status_msg_id, "⚡ **حقن كوكيز...**", driver=driver, is_photo=is_photo)
-                        inject_cookies_safely(driver, scook); cook_tried = True
-                        if not safe_get(driver, turl): sdm(chat_id, status_msg_id); return R_RETRY
-                        state = istate; time.sleep(2); continue
+                        inject_cookies_safely(driver, scook)
+                        cook_tried = True
+                        if not safe_get(driver, turl):
+                            sdm(chat_id, status_msg_id)
+                            return R_RETRY
+                        state = istate
+                        time.sleep(4)
+                        continue
                     elif cs.get('status') != 'waiting_credentials' and not cs.get('email'):
                         sdm(chat_id, status_msg_id)
                         msg = bot.send_message(chat_id, "⚠️ **مطلوب بيانات الدخول.**\n\n`student-02-xxx@qwiklabs.net Password123`", parse_mode="Markdown")
                         update_session(chat_id, {'status': 'waiting_credentials', 'ui_msg_id': msg.message_id, 'interaction_time': time.time()})
-                        status_msg_id = msg.message_id; continue
+                        status_msg_id = msg.message_id
+                        continue
 
+                # إدخال بيانات الدخول إذا توفرت
                 if cs.get('email') and cs.get('password'):
                     try:
-                        if ei and ei[0].is_displayed():
+                        if email_visible:
                             uls(chat_id, status_msg_id, "مصادقة", f"بريد: {cs['email']}", driver=driver, is_photo=is_photo)
                             ei[0].clear(); ei[0].send_keys(cs['email']); ei[0].send_keys(Keys.ENTER)
-                            time.sleep(2); continue
-                        elif pi and pi[0].is_displayed():
+                            time.sleep(3); continue
+                        elif password_visible:
                             uls(chat_id, status_msg_id, "مصادقة", "كلمة مرور... ***", driver=driver, is_photo=is_photo)
                             pi[0].clear(); pi[0].send_keys(cs['password']); pi[0].send_keys(Keys.ENTER)
-                            time.sleep(3); update_session(chat_id, {'email': None, 'password': None}); state = "INIT"
+                            time.sleep(4); update_session(chat_id, {'email': None, 'password': None}); state = "INIT"
                             sdm(chat_id, status_msg_id)
                             mk = InlineKeyboardMarkup().add(InlineKeyboardButton("🛑 إلغاء", callback_data="abort_mission"))
                             ss = safe_screenshot(driver)
@@ -708,6 +843,10 @@ def run_single_task(chat_id, url, task_id, attempt_num):
                     except Exception as e: print(f"Login: {e}")
 
                 if cs.get('status') == 'waiting_credentials': continue
+
+            # ═══════════════════════════════════════════════════
+            # باقي المنطق كما هو
+            # ═══════════════════════════════════════════════════
 
             if state == "WAIT_USER_SELECTION":
                 if cs.get('selected_region') and cs.get('protocol'):
