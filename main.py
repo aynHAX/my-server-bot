@@ -281,6 +281,9 @@ curl -s -X POST "https://api.telegram.org/bot<BOT_TOKEN_PLACEHOLDER>/sendMessage
 echo "SUCCESS_OCX_FINISH"
 """
 
+# ==========================================
+# 🌍 ترجمة المناطق (شاملة - بدون أعلام بيضاء)
+# ==========================================
 def translate_region(name):
     translations = {
         'South Carolina': 'ساوث كارولينا 🇺🇸',
@@ -450,7 +453,7 @@ display.start()
 def create_driver():
     nuke_all_chrome(); time.sleep(2)
     opt = Options()
-    for a in ['--headless=new','--no-sandbox','---disable-dev-shm-usage','--disable-gpu',
+    for a in ['--headless=new','--no-sandbox','--disable-dev-shm-usage','--disable-gpu',
               '--disable-software-rasterizer','--disable-extensions','--disable-background-networking',
               '--disable-default-apps','--disable-sync','--disable-translate','--disable-hang-monitor',
               '--disable-component-update','--disable-backgrounding-occluded-windows',
@@ -572,13 +575,19 @@ def uls(cid, mid, text, logs=None, driver=None, is_photo=False):
 # 🔧 فحص الحظر المرئي — فقط innerText المرئي وليس page_source كامل
 # ═══════════════════════════════════════════════════════════════
 def is_account_actually_blocked(d):
+    """
+    يفحص النص المرئي فقط (innerText) وليس مصدر الصفحة كامل.
+    يتجاهل العناصر المخفية، السكربتات، والتعليقات.
+    """
     try:
         result = safe_exec(d, """
             try {
                 var bodyText = document.body.innerText || '';
                 var lower = bodyText.toLowerCase();
                 
+                // فحص رسائل الخطأ المرئية فقط
                 if (lower.includes("couldn't sign you in") && lower.includes("domain admin")) {
+                    // تأكد إضافي: العنصر مرئي فعلاً
                     var els = document.querySelectorAll('div, span, h1, h2, p, [role="alert"], [role="heading"]');
                     for (var i = 0; i < els.length; i++) {
                         var t = (els[i].innerText || '').trim().toLowerCase();
@@ -593,6 +602,7 @@ def is_account_actually_blocked(d):
                     }
                 }
                 
+                // فحص "admin for help" فقط إذا كان مرئياً ولا يوجد حقل إدخال
                 var hasEmailInput = document.querySelector("input[type='email']");
                 var hasPasswordInput = document.querySelector("input[type='password']");
                 if (!hasEmailInput && !hasPasswordInput) {
@@ -611,210 +621,6 @@ def is_account_actually_blocked(d):
                     }
                 }
                 
-                return false;
-            } catch(e) { return false; }
-        """)
-        return result == True
-    except:
-        return False
-
-# ═══════════════════════════════════════════════════════════════
-# 🔧 معالجة صفحة الترحيب — "Welcome to your new account"
-# يضغط زر القبول/المتابعة تلقائياً
-# ═══════════════════════════════════════════════════════════════
-def handle_welcome_page(d):
-    """
-    يكتشف صفحة الترحيب الخاصة بـ Google Workspace
-    ويضغط زر القبول/الموافقة/المتابعة تلقائياً.
-    يدعم: الإنجليزية، العربية، الهولندية، الفرنسية، الإسبانية، الألمانية
-    """
-    try:
-        result = safe_exec(d, """
-            try {
-                var bodyText = (document.body.innerText || '').toLowerCase();
-                var isWelcome = bodyText.includes('welcome to your new account') || 
-                                bodyText.includes('welcome to your new account') ||
-                                bodyText.includes('your organization administrator manages') ||
-                                bodyText.includes('qwiklabs.net administrator') ||
-                                bodyText.includes('enterprise agreement') ||
-                                bodyText.includes('google cloud privacy notice') ||
-                                bodyText.includes('governed by their respective') ||
-                                bodyText.includes('if you do not agree') ||
-                                bodyText.includes('terms of service');
-                
-                if (!isWelcome) return 'not_welcome';
-                
-                // ابحث عن أي checkbox واضغط عليه أولاً
-                var checkboxes = document.querySelectorAll('input[type="checkbox"], [role="checkbox"], mat-checkbox');
-                for (var c = 0; c < checkboxes.length; c++) {
-                    var cbRect = checkboxes[c].getBoundingClientRect();
-                    var cbStyle = window.getComputedStyle(checkboxes[c]);
-                    if (cbRect.width > 0 && cbRect.height > 0 && cbStyle.display !== 'none') {
-                        try { checkboxes[c].click(); } catch(e) {}
-                    }
-                }
-                
-                // قائمة الأزرار المقبولة بأطقم متعددة
-                var acceptTexts = [
-                    'i understand', 'i accept', 'accept', 'agree', 'i agree',
-                    'continue', 'got it', 'ok', 'okay', 'next', 'proceed',
-                    'confirm', 'acknowledge',
-                    // عربي
-                    'أفهم', 'أوافق', 'موافق', 'متابعة', 'قبول', 'حسناً', 
-                    'موافق ومتابعة', 'فهمت', 'أستمر',
-                    // هولندي
-                    'ik begrijp', 'ik accepteer', 'akkoord', 'doorgaan', 'begrepen',
-                    'akkoord en doorgaan', 'ik ga akkoord',
-                    // فرنسي
-                    'j\\'accepte', 'je comprends', 'accepter', 'continuer', 
-                    'j\\'ai compris', 'd\\'accord',
-                    // إسباني
-                    'acepto', 'aceptar', 'entendido', 'continuar', 'estoy de acuerdo',
-                    'he entendido', 'de acuerdo',
-                    // ألماني
-                    'ich stimme zu', 'ich verstehe', 'akzeptieren', 'weiter',
-                    'einverstanden', 'verstanden', 'zustimmen',
-                    // إيطالي
-                    'accetto', 'accettare', 'ho capito', 'continua', 'consento',
-                    // برتغالي
-                    'aceito', 'aceitar', 'entendi', 'continuar', 'concordo',
-                    // ياباني (روماجي)
-                    'i agree', 'agree'
-                ];
-                
-                // ابحث عن زر القبول
-                var allButtons = document.querySelectorAll('button, input[type="submit"], input[type="button"], a[role="button"], div[role="button"], span[role="button"]');
-                var bestMatch = null;
-                var bestScore = 0;
-                
-                for (var i = 0; i < allButtons.length; i++) {
-                    var btn = allButtons[i];
-                    var btnText = ((btn.innerText || btn.textContent || btn.value || '')).trim().toLowerCase();
-                    var rect = btn.getBoundingClientRect();
-                    var style = window.getComputedStyle(btn);
-                    
-                    if (rect.width <= 0 || rect.height <= 0) continue;
-                    if (style.display === 'none' || style.visibility === 'hidden') continue;
-                    if (parseFloat(style.opacity) === 0) continue;
-                    if (btn.disabled) continue;
-                    if (btnText.length < 2) continue;
-                    
-                    for (var j = 0; j < acceptTexts.length; j++) {
-                        var at = acceptTexts[j];
-                        if (btnText === at) {
-                            // تطابق تام = أعلى أولوية
-                            if (at.length > bestScore) {
-                                bestScore = at.length + 100;
-                                bestMatch = btn;
-                            }
-                        } else if (btnText.includes(at) && at.length >= 4) {
-                            if (at.length > bestScore) {
-                                bestScore = at.length;
-                                bestMatch = btn;
-                            }
-                        }
-                    }
-                }
-                
-                // ابحث أيضاً في الروابط
-                if (!bestMatch) {
-                    var links = document.querySelectorAll('a');
-                    for (var k = 0; k < links.length; k++) {
-                        var linkText = ((links[k].innerText || links[k].textContent || '')).trim().toLowerCase();
-                        var lRect = links[k].getBoundingClientRect();
-                        var lStyle = window.getComputedStyle(links[k]);
-                        if (lRect.width <= 0 || lRect.height <= 0) continue;
-                        if (lStyle.display === 'none' || lStyle.visibility === 'hidden') continue;
-                        if (linkText.length < 2) continue;
-                        for (var m = 0; m < acceptTexts.length; m++) {
-                            if (linkText === acceptTexts[m] || (linkText.includes(acceptTexts[m]) && acceptTexts[m].length >= 4)) {
-                                bestMatch = links[k];
-                                bestScore = acceptTexts[m].length;
-                                break;
-                            }
-                        }
-                        if (bestMatch) break;
-                    }
-                }
-                
-                if (bestMatch) {
-                    // حاول scroll إلى الزر أولاً
-                    try { bestMatch.scrollIntoView({block: 'center', behavior: 'instant'}); } catch(e) {}
-                    
-                    // انتظر لحظة قبل الضغط
-                    setTimeout(function() {
-                        try { bestMatch.click(); } catch(e) {
-                            // محاولة بديلة: محاكاة النقر
-                            var evt = new MouseEvent('click', {bubbles: true, cancelable: true, view: window});
-                            bestMatch.dispatchEvent(evt);
-                        }
-                    }, 200);
-                    
-                    return 'clicked';
-                }
-                
-                // إذا لم يجد زر، ابحث عن أي زر مرئي يحتوي على كلمة مرتبطة
-                if (!bestMatch) {
-                    var genericKeywords = ['accept', 'agree', 'continue', 'understand', 'ok', 
-                                           'موافق', 'متابعة', 'قبول', 'أوافق', 'أفهم',
-                                           'akkoord', 'doorgaan', 'accepter', 'continuer',
-                                           'aceptar', 'weiter', 'akzeptieren'];
-                    for (var n = 0; n < allButtons.length; n++) {
-                        var gt = ((allButtons[n].innerText || allButtons[n].textContent || allButtons[n].value || '')).trim().toLowerCase();
-                        var gRect = allButtons[n].getBoundingClientRect();
-                        var gStyle = window.getComputedStyle(allButtons[n]);
-                        if (gRect.width <= 0 || gRect.height <= 0) continue;
-                        if (gStyle.display === 'none' || gStyle.visibility === 'hidden') continue;
-                        if (allButtons[n].disabled) continue;
-                        for (var p = 0; p < genericKeywords.length; p++) {
-                            if (gt.includes(genericKeywords[p]) && gt.length < 50) {
-                                try { allButtons[n].scrollIntoView({block: 'center'}); } catch(e) {}
-                                try { allButtons[n].click(); } catch(e) {}
-                                return 'clicked_generic';
-                            }
-                        }
-                    }
-                }
-                
-                return 'welcome_no_button';
-            } catch(e) { return 'error: ' + e.message; }
-        """)
-        return result
-    except:
-        return 'error'
-
-# ═══════════════════════════════════════════════════════════════
-# 🔧 النقر على أزرار الموافقة العامة — صفحات Terms/Privacy
-# ═══════════════════════════════════════════════════════════════
-def click_any_accept_button(d):
-    """يبحث عن أي زر موافقة/قبول/متابعة في الصفحة ويضغطه"""
-    try:
-        result = safe_exec(d, """
-            try {
-                var acceptKeywords = [
-                    'accept', 'agree', 'i understand', 'continue', 'got it', 'ok', 
-                    'acknowledge', 'proceed', 'confirm', 'i accept', 'i agree',
-                    'موافق', 'متابعة', 'قبول', 'أوافق', 'أفهم', 'حسناً', 'فهمت',
-                    'akkoord', 'doorgaan', 'ik begrijp', 'accepter', 'continuer',
-                    'aceptar', 'acepto', 'weiter', 'akzeptieren', 'ich stimme zu'
-                ];
-                var buttons = document.querySelectorAll('button, input[type="submit"], input[type="button"], a[role="button"], div[role="button"]');
-                for (var i = 0; i < buttons.length; i++) {
-                    var t = ((buttons[i].innerText || buttons[i].textContent || buttons[i].value || '')).trim().toLowerCase();
-                    var rect = buttons[i].getBoundingClientRect();
-                    var style = window.getComputedStyle(buttons[i]);
-                    if (rect.width <= 0 || rect.height <= 0) continue;
-                    if (style.display === 'none' || style.visibility === 'hidden') continue;
-                    if (buttons[i].disabled) continue;
-                    if (t.length < 2 || t.length > 60) continue;
-                    for (var j = 0; j < acceptKeywords.length; j++) {
-                        if (t === acceptKeywords[j] || (t.includes(acceptKeywords[j]) && acceptKeywords[j].length >= 4)) {
-                            try { buttons[i].scrollIntoView({block: 'center'}); } catch(e) {}
-                            try { buttons[i].click(); } catch(e) {}
-                            return true;
-                        }
-                    }
-                }
                 return false;
             } catch(e) { return false; }
         """)
@@ -842,6 +648,8 @@ def run_single_task(chat_id, url, task_id, attempt_num):
 
         turl = url
         istate = "INIT"
+        sso_tried = True
+        # 🔧 الإصلاح: sso_tried = False دائماً للروابط الجديدة
         sso_tried = False
 
         if spid and (cs.get('replace_mode') or cs.get('add_new_mode')):
@@ -856,13 +664,13 @@ def run_single_task(chat_id, url, task_id, attempt_num):
         if not safe_get(driver, turl):
             raise Exception("CHROME_CRASH")
 
+        # 🔧 انتظار أطول للتحميل/إعادة التوجيه
         time.sleep(5)
 
         state = istate
         cook_tried = False
+        time.sleep(3)
         sso_retry_count = 0
-        welcome_tried = False
-        welcome_attempt_count = 0
 
         mk = InlineKeyboardMarkup().add(InlineKeyboardButton("🛑 إلغاء فوري", callback_data="abort_mission"))
         rn = f"\n🔄 *(محاولة {attempt_num})*" if attempt_num > 1 else ""
@@ -877,6 +685,7 @@ def run_single_task(chat_id, url, task_id, attempt_num):
         lc = 0
         pid = spid or ""
         dead = 0
+        blocked_check_count = 0
 
         while lc < 300:
             lc += 1
@@ -918,23 +727,31 @@ def run_single_task(chat_id, url, task_id, attempt_num):
                     return R_ABORT
 
             # ═══════════════════════════════════════════════════
-            # 🔧 معالجة accounts.google.com
+            # 🔧 معالجة accounts.google.com — منطق جديد بالكامل
             # ═══════════════════════════════════════════════════
             if 'accounts.google.com' in cur_url:
+                pl = safe_source(driver).lower()
+                if "couldn't sign you in" in pl or "domain admin" in pl or "admin for help" in pl:
+                    sdm(chat_id, status_msg_id)
+                    bot.send_message(chat_id, "❌ **حساب محظور.**\n💡 أغلق اللاب وابدأ جديد.", parse_mode="Markdown")
+                    return R_ABORT
+                # انتظار قليل للصفحة
                 time.sleep(1)
 
                 ei = safe_find(driver, By.XPATH, "//input[@type='email']")
                 pi = safe_find(driver, By.XPATH, "//input[@type='password']")
 
+                if ei and ei[0].is_displayed() and not (pi and pi[0].is_displayed()):
                 email_visible = ei and len(ei) > 0 and ei[0].is_displayed()
                 password_visible = pi and len(pi) > 0 and pi[0].is_displayed()
 
-                # 🔧 فحص الحظر
+                # 🔧 فحص الحظر: فقط عندما لا يوجد حقل إدخال مرئي
+                # وإعادة محاولة SSO قبل إعلان الحظر
                 if not email_visible and not password_visible:
                     if is_account_actually_blocked(driver):
-                        blocked_check_count = getattr(run_single_task, '_blocked_count', 0) + 1
-                        run_single_task._blocked_count = blocked_check_count
+                        blocked_check_count += 1
                         
+                        # 🔧 إعادة محاولة SSO قبل الحجز نهائياً
                         if sso_retry_count < 2 and not sso_tried:
                             sso_retry_count += 1
                             sso_tried = True
@@ -959,126 +776,41 @@ def run_single_task(chat_id, url, task_id, attempt_num):
                             time.sleep(5)
                             continue
                         else:
+                            # تأكيد أخير: انتظر 3 ثواني وأعد الفحص
                             time.sleep(3)
                             if is_account_actually_blocked(driver):
                                 sdm(chat_id, status_msg_id)
                                 bot.send_message(chat_id, "❌ **حساب محظور فعلاً.**\n💡 أغلق اللاب وابدأ جديد.", parse_mode="Markdown")
                                 return R_ABORT
+                            # إذا لم يعد محظور، تابع
                             state = "INIT"
                             continue
                     else:
-                        # ═══════════════════════════════════════════════════
-                        # 🔧 معالجة صفحة الترحيب — الجديد!
-                        # ═══════════════════════════════════════════════════
-                        welcome_result = handle_welcome_page(driver)
-                        
-                        if welcome_result == 'clicked' or welcome_result == 'clicked_generic':
-                            uls(chat_id, status_msg_id, "✅ **قبول شروط Google Workspace...**", driver=driver, is_photo=is_photo)
-                            time.sleep(4)
-                            # بعد الضغط، تحقق من URL الجديد
-                            new_url = safe_url(driver)
-                            if new_url and 'accounts.google.com' not in new_url:
-                                # تم الانتقال بنجاح
-                                state = "INIT"
-                                continue
-                            # إذا ما زلنا على accounts.google.com، انتظر قليلاً
-                            time.sleep(3)
-                            new_url2 = safe_url(driver)
-                            if new_url2 and 'accounts.google.com' not in new_url2:
-                                state = "INIT"
-                                continue
-                            # ما زلنا على نفس الصفحة، حاول مرة أخرى
-                            welcome_attempt_count += 1
-                            if welcome_attempt_count > 5:
-                                # جرب SSO إعادة
-                                if not sso_tried:
-                                    sso_tried = True
-                                    uls(chat_id, status_msg_id, "🔄 **إعادة محاولة SSO بعد الترحيب...**", driver=driver, is_photo=is_photo)
-                                    if not safe_get(driver, url):
-                                        sdm(chat_id, status_msg_id)
-                                        return R_RETRY
-                                    time.sleep(5)
-                                    welcome_attempt_count = 0
-                                    continue
+                        # الصفحة لا تحتوي على خطأ مرئي ولا حقل إدخال
+                        # ممكن صفحة تحميل أو إعادة توجيه — انتظر
+                        if lc < 10:
+                            uls(chat_id, status_msg_id, "⏳ **انتظار إعادة توجيه...**", driver=driver, is_photo=is_photo)
+                            time.sleep(2)
                             continue
-                        
-                        elif welcome_result == 'welcome_no_button':
-                            # صفحة ترحيب لكن لم يجد زر
-                            welcome_attempt_count += 1
-                            if welcome_attempt_count <= 3:
-                                uls(chat_id, status_msg_id, f"⏳ **صفحة الترحيب — بحث عن زر القبول...**", driver=driver, is_photo=is_photo)
-                                # حاول النقر على أي زر قبول عام
-                                if click_any_accept_button(driver):
-                                    uls(chat_id, status_msg_id, "✅ **تم النقر على زر القبول...**", driver=driver, is_photo=is_photo)
-                                    time.sleep(4)
-                                    continue
-                                time.sleep(2)
-                                continue
-                            else:
-                                # جرب SSO
-                                if not sso_tried:
-                                    sso_tried = True
-                                    uls(chat_id, status_msg_id, "🔄 **إعادة محاولة SSO...**", driver=driver, is_photo=is_photo)
-                                    if not safe_get(driver, url):
-                                        sdm(chat_id, status_msg_id)
-                                        return R_RETRY
-                                    time.sleep(5)
-                                    welcome_attempt_count = 0
-                                    continue
-                                # انتظر أكثر
-                                if lc < 20:
-                                    time.sleep(3)
-                                    continue
-                        
-                        elif welcome_result == 'not_welcome':
-                            # ليست صفحة ترحيب ولا يوجد خطأ
-                            # ممكن صفحة تحميل أو إعادة توجيه
-                            if lc < 8:
-                                uls(chat_id, status_msg_id, "⏳ **انتظار إعادة توجيه...**", driver=driver, is_photo=is_photo)
-                                time.sleep(2)
-                                continue
-                            # بعد انتظار، جرب SSO
-                            if not sso_tried:
-                                sso_tried = True
-                                uls(chat_id, status_msg_id, "🔄 **محاولة SSO...**", driver=driver, is_photo=is_photo)
-                                if not safe_get(driver, url):
-                                    sdm(chat_id, status_msg_id)
-                                    return R_RETRY
-                                state = "INIT"
-                                time.sleep(5)
-                                continue
-                            # جرب النقر على أي زر قبول
-                            if click_any_accept_button(driver):
-                                uls(chat_id, status_msg_id, "✅ **نقر زر قبول عام...**", driver=driver, is_photo=is_photo)
-                                time.sleep(4)
-                                continue
-                            # آخر محاولة: انتظر
-                            if lc < 30:
-                                time.sleep(3)
-                                continue
-                            # فشل كل شيء
-                            sdm(chat_id, status_msg_id)
-                            bot.send_message(chat_id, "⚠️ **تعذر التحويل من صفحة Google.**\n💡 أعد إرسال الرابط.", parse_mode="Markdown")
-                            return R_ABORT
-                        
-                        else:
-                            # error أو أي نتيجة أخرى
-                            if lc < 10:
-                                time.sleep(2)
-                                continue
-                            if not sso_tried:
-                                sso_tried = True
-                                if not safe_get(driver, url):
-                                    sdm(chat_id, status_msg_id)
-                                    return R_RETRY
-                                time.sleep(5)
-                                continue
+                        # بعد انتظار طويل، حاول SSO
+                        if not sso_tried:
+                            sso_tried = True
+                            uls(chat_id, status_msg_id, "🔄 **محاولة SSO...**", driver=driver, is_photo=is_photo)
+                            if not safe_get(driver, url):
+                                sdm(chat_id, status_msg_id)
+                                return R_RETRY
+                            state = "INIT"
+                            time.sleep(5)
+                            continue
 
                 # 🔧 منطق SSO/الكوكيز/بيانات الدخول
                 if email_visible and not password_visible:
                     if not sso_tried:
+                        uls(chat_id, status_msg_id, "🔄 **SSO...**", driver=driver, is_photo=is_photo)
                         uls(chat_id, status_msg_id, "🔄 **محاولة SSO...**", driver=driver, is_photo=is_photo)
                         sso_tried = True
+                        if not safe_get(driver, url): sdm(chat_id, status_msg_id); return R_RETRY
+                        state = "INIT"; time.sleep(2); continue
                         if not safe_get(driver, url):
                             sdm(chat_id, status_msg_id)
                             return R_RETRY
@@ -1087,6 +819,9 @@ def run_single_task(chat_id, url, task_id, attempt_num):
                         continue
                     elif not cook_tried and scook:
                         uls(chat_id, status_msg_id, "⚡ **حقن كوكيز...**", driver=driver, is_photo=is_photo)
+                        inject_cookies_safely(driver, scook); cook_tried = True
+                        if not safe_get(driver, turl): sdm(chat_id, status_msg_id); return R_RETRY
+                        state = istate; time.sleep(2); continue
                         inject_cookies_safely(driver, scook)
                         cook_tried = True
                         if not safe_get(driver, turl):
@@ -1099,19 +834,24 @@ def run_single_task(chat_id, url, task_id, attempt_num):
                         sdm(chat_id, status_msg_id)
                         msg = bot.send_message(chat_id, "⚠️ **مطلوب بيانات الدخول.**\n\n`student-02-xxx@qwiklabs.net Password123`", parse_mode="Markdown")
                         update_session(chat_id, {'status': 'waiting_credentials', 'ui_msg_id': msg.message_id, 'interaction_time': time.time()})
+                        status_msg_id = msg.message_id; continue
                         status_msg_id = msg.message_id
                         continue
 
-                # إدخال بيانات الدخول
+                # إدخال بيانات الدخول إذا توفرت
                 if cs.get('email') and cs.get('password'):
                     try:
+                        if ei and ei[0].is_displayed():
                         if email_visible:
                             uls(chat_id, status_msg_id, "مصادقة", f"بريد: {cs['email']}", driver=driver, is_photo=is_photo)
                             ei[0].clear(); ei[0].send_keys(cs['email']); ei[0].send_keys(Keys.ENTER)
+                            time.sleep(2); continue
+                        elif pi and pi[0].is_displayed():
                             time.sleep(3); continue
                         elif password_visible:
                             uls(chat_id, status_msg_id, "مصادقة", "كلمة مرور... ***", driver=driver, is_photo=is_photo)
                             pi[0].clear(); pi[0].send_keys(cs['password']); pi[0].send_keys(Keys.ENTER)
+                            time.sleep(3); update_session(chat_id, {'email': None, 'password': None}); state = "INIT"
                             time.sleep(4); update_session(chat_id, {'email': None, 'password': None}); state = "INIT"
                             sdm(chat_id, status_msg_id)
                             mk = InlineKeyboardMarkup().add(InlineKeyboardButton("🛑 إلغاء", callback_data="abort_mission"))
@@ -1124,7 +864,7 @@ def run_single_task(chat_id, url, task_id, attempt_num):
                 if cs.get('status') == 'waiting_credentials': continue
 
             # ═══════════════════════════════════════════════════
-            # باقي المنطق
+            # باقي المنطق كما هو
             # ═══════════════════════════════════════════════════
 
             if state == "WAIT_USER_SELECTION":
@@ -1148,18 +888,13 @@ def run_single_task(chat_id, url, task_id, attempt_num):
                 am = {"INIT": "التهيئة", "WAIT_DEPLOY": "واجهة البناء", "WAIT_REGION": "خريطة السيرفرات", "EXTRACT_REGIONS": "استخراج البيانات", "AUTHORIZE_SHELL": "تفويض الطرفية", "WAIT_TERMINAL_BOOT": "تشغيل Linux", "INJECT_PAYLOAD": "حقن السكربت"}
                 uls(chat_id, status_msg_id, f"🟢 المرحلة: `{am.get(state, state)}`", driver=driver, is_photo=is_photo)
 
-            # 🔧 النقر على أزرار الموافقة العامة في أي صفحة
             try:
-                for btn in safe_find(driver, By.XPATH, "//button[contains(.,'Agree and continue') or contains(.,'موافق ومتابعة') or contains(.,'Akkoord en doorgaan') or contains(.,'I understand') or contains(.,'Accept') or contains(.,'Continue') or contains(.,'أفهم') or contains(.,'موافق')]"):
+                for btn in safe_find(driver, By.XPATH, "//button[contains(.,'Agree and continue') or contains(.,'موافق ومتابعة') or contains(.,'Akkoord en doorgaan')]"):
                     if btn.is_displayed():
                         for cb in safe_find(driver, By.XPATH, "//*[@role='checkbox'] | //mat-checkbox | //input[@type='checkbox']"):
                             safe_exec(driver, "arguments[0].click();", cb)
                         time.sleep(1); safe_exec(driver, "arguments[0].click();", btn); break
             except: pass
-
-            # 🔧 أيضاً حاول click_any_accept_button في أي حالة
-            if state in ["INIT", "WAIT_DEPLOY", "WAIT_REGION"]:
-                click_any_accept_button(driver)
 
             if state == "INIT":
                 if 'accounts.google.com' in cur_url:
@@ -1167,7 +902,7 @@ def run_single_task(chat_id, url, task_id, attempt_num):
                         for el in safe_find(driver, By.XPATH, "//*[@id='confirm'] | //input[@type='submit'] | //button | //div[@role='button'] | //span"):
                             t = ((el.text or el.get_attribute('value') or '')).lower()
                             eid = el.get_attribute('id') or ''
-                            if any(k in t for k in ['understand','begrijp','accept','أفهم','موافق','continue','متابعة','agree','i agree','i understand','ok','got it']) or eid == 'confirm':
+                            if any(k in t for k in ['understand','begrijp','accept','أفهم','موافق','continue','متابعة']) or eid == 'confirm':
                                 safe_exec(driver, "arguments[0].click();", el); break
                     except: pass
                 elif 'console.cloud.google.com' in cur_url:
@@ -1434,7 +1169,7 @@ def admin_kb(msg):
         bot.reply_to(msg, f"📊 **النظام:**\n📦 طابور: `{task_queue.qsize()}`\n💾 `{'MongoDB 🟢' if USE_MONGO else 'RAM 🟡'}`\n👷 Worker: `{wa}`", parse_mode="Markdown")
     elif t == "➕ إضافة عميل":
         m = bot.send_message(cid, "✏️ **ID:**"); bot.register_next_step_handler(m, process_add_vip)
-    elif t == "➖ إزالة عميل">
+    elif t == "➖ إزالة عميل":
         m = bot.send_message(cid, "✏️ **ID:**"); bot.register_next_step_handler(m, process_del_vip)
     elif t == "📢 إذاعة رسالة":
         m = bot.send_message(cid, "📢 **الرسالة:**"); bot.register_next_step_handler(m, process_broadcast)
