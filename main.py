@@ -3,6 +3,7 @@ import time
 import threading
 import queue
 import io
+import random
 import http.server
 import socketserver
 import subprocess
@@ -447,6 +448,53 @@ threading.Thread(target=run_hc, daemon=True).start()
 display = Display(visible=0, size=(800, 600))
 display.start()
 
+STEALTH_JS = """
+Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+delete navigator.__proto__.webdriver;
+
+window.chrome = {runtime: {}, loadTimes: function(){return {}}, csi: function(){return {}}, app: {}};
+
+Object.defineProperty(navigator, 'plugins', {get: () => {
+    const p = {length: 5, 0: {name:'Chrome PDF Plugin', filename:'internal-pdf-viewer', description:'Portable Document Format'},
+               1: {name:'Chrome PDF Viewer', filename:'mhjfbmdgcfjbbpaeojofohoefgiehjai', description:''},
+               2: {name:'Native Client', filename:'internal-nacl-plugin', description:''},
+               3: {name:'Chromium PDF Plugin', filename:'internal-pdf-viewer', description:'Portable Document Format'},
+               4: {name:'Chromium PDF Viewer', filename:'mhjfbmdgcfjbbpaeojofohoefgiehjai', description:''}};
+    p[Symbol.iterator] = function*(){for(let i=0;i<this.length;i++)yield this[i]}; return p;
+}});
+
+Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+Object.defineProperty(navigator, 'language', {get: () => 'en-US'});
+Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
+Object.defineProperty(navigator, 'productSub', {get: () => '20030107'});
+Object.defineProperty(navigator, 'vendor', {get: () => 'Google Inc.'});
+Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 4});
+Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
+Object.defineProperty(navigator, 'maxTouchPoints', {get: () => 0});
+Object.defineProperty(navigator, 'doNotTrack', {get: () => null});
+
+Object.defineProperty(screen, 'availWidth', {get: () => 1920});
+Object.defineProperty(screen, 'availHeight', {get: () => 1040});
+Object.defineProperty(screen, 'width', {get: () => 1920});
+Object.defineProperty(screen, 'height', {get: () => 1080});
+Object.defineProperty(screen, 'colorDepth', {get: () => 24});
+Object.defineProperty(screen, 'pixelDepth', {get: () => 24});
+
+Object.defineProperty(navigator, 'permissions', {get: () => ({
+    query: (p) => Promise.resolve({state: p.state || 'prompt', onchange: null})
+})});
+
+const getParameter = WebGLRenderingContext.prototype.getParameter;
+WebGLRenderingContext.prototype.getParameter = function(p) {
+    if (p === 37445) return 'Intel Inc.';
+    if (p === 37446) return 'Intel Iris OpenGL Engine';
+    return getParameter.call(this, p);
+};
+
+const now = new Date();
+Object.defineProperty(Date.prototype, 'getTimezoneOffset', {get: () => -120});
+"""
+
 def create_driver():
     nuke_all_chrome(); time.sleep(2)
     opt = Options()
@@ -456,22 +504,29 @@ def create_driver():
               '--disable-component-update','--disable-backgrounding-occluded-windows',
               '--disable-renderer-backgrounding','--disable-background-timer-throttling',
               '--disable-ipc-flooding-protection','--disable-client-side-phishing-detection',
-              '--disable-popup-blocking','--no-first-run','--incognito',
+              '--disable-popup-blocking','--no-first-run',
               '--renderer-process-limit=1',
-              '--disable-features=site-per-process,VizDisplayCompositor,TranslateUI',
-              '--js-flags=--max-old-space-size=256','--window-size=1280,800',
+              '--disable-features=site-per-process,VizDisplayCompositor,TranslateUI,AutofillServerCommunication',
+              '--js-flags=--max-old-space-size=256','--window-size=1920,1080',
               '--disable-blink-features=AutomationControlled',
               '--disk-cache-size=0','--media-cache-size=0',
               '--aggressive-cache-discard','--disable-cache','--disable-application-cache',
-              '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36']:
+              '--lang=en-US',
+              '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36']:
         opt.add_argument(a)
     opt.page_load_strategy = 'eager'
     opt.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
     opt.add_experimental_option('useAutomationExtension', False)
-    opt.add_experimental_option("prefs", {"profile.default_content_setting_values.notifications": 2})
+    opt.add_experimental_option("prefs", {
+        "profile.default_content_setting_values.notifications": 2,
+        "credentials_enable_service": False,
+        "profile.password_manager_enabled": False,
+        "safebrowsing.enabled": False,
+    })
     svc = Service(log_output=os.devnull)
     d = webdriver.Chrome(options=opt, service=svc)
-    d.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"})
+    d.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": STEALTH_JS})
+    d.execute_cdp_cmd("Network.setBypassServiceWorker", {"bypass": True})
     d.set_page_load_timeout(150); d.set_script_timeout(30); d.implicitly_wait(3)
     return d
 
@@ -711,11 +766,21 @@ def run_single_task(chat_id, url, task_id, attempt_num):
                     try:
                         if ei and ei[0].is_displayed():
                             uls(chat_id, status_msg_id, "مصادقة", f"بريد: {cs['email']}", driver=driver, is_photo=is_photo)
-                            ei[0].clear(); ei[0].send_keys(cs['email']); ei[0].send_keys(Keys.ENTER)
+                            ei[0].click(); time.sleep(0.3)
+                            ei[0].clear(); time.sleep(0.1)
+                            for ch in cs['email']:
+                                ei[0].send_keys(ch)
+                                time.sleep(random.uniform(0.03, 0.09))
+                            time.sleep(0.5); ei[0].send_keys(Keys.ENTER)
                             time.sleep(2); continue
                         elif pi and pi[0].is_displayed():
                             uls(chat_id, status_msg_id, "مصادقة", "كلمة مرور... ***", driver=driver, is_photo=is_photo)
-                            pi[0].clear(); pi[0].send_keys(cs['password']); pi[0].send_keys(Keys.ENTER)
+                            pi[0].click(); time.sleep(0.3)
+                            pi[0].clear(); time.sleep(0.1)
+                            for ch in cs['password']:
+                                pi[0].send_keys(ch)
+                                time.sleep(random.uniform(0.03, 0.09))
+                            time.sleep(0.5); pi[0].send_keys(Keys.ENTER)
                             time.sleep(3); update_session(chat_id, {'email': None, 'password': None}); state = "INIT"
                             sdm(chat_id, status_msg_id)
                             mk = InlineKeyboardMarkup().add(InlineKeyboardButton("🛑 إلغاء", callback_data="abort_mission"))
