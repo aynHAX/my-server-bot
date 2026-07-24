@@ -681,11 +681,11 @@ def run_single_task(chat_id, url, task_id, attempt_num):
                     if pi_check and pi_check[0].is_displayed():
                         has_pw_input = True
 
-                    # ✅ فقط لو ما في أي حقل دخول → صفحة خطأ حقيقية
+                    # ✅ فقط لو ما في أي حقل دخول → صفحة خطأ حقيقية → إعادة محاولة بجلسة جديدة
                     if not has_email_input and not has_pw_input:
                         sdm(chat_id, status_msg_id)
-                        bot.send_message(chat_id, "❌ **حساب محظور.**\n💡 أغلق اللاب وابدأ جديد.", parse_mode="Markdown")
-                        return R_ABORT
+                        safe_exec(driver, "document.cookie.split(';').forEach(c=>{document.cookie=c.trim().split('=')[0]+'=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';})")
+                        return R_RETRY
 
                 ei = safe_find(driver, By.XPATH, "//input[@type='email']")
                 pi = safe_find(driver, By.XPATH, "//input[@type='password']")
