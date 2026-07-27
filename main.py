@@ -61,20 +61,34 @@ else:
     USE_MONGO = False
     print("⚠️ [DB] No MONGO_URI. RAM mode.")
 
-task_queue = queue.Queue()
-driver_lock = threading.Lock()
-worker_thread = None
+task_queue = queue.Queue(maxsize=20)
+worker_lock = threading.Lock()
+workers = []
 
 if ADMIN_ID and not USE_MONGO:
     ram_vips.add(str(ADMIN_ID))
 
 def nuke_all_chrome():
+    """قتل كل عمليات Chrome — يستخدم فقط عند الإقلاع وإيقاف الطوارئ."""
     for p in ['chrome', 'chromium', 'chromedriver', 'google-chrome']:
         try: subprocess.run(['pkill', '-9', '-f', p], timeout=5, capture_output=True)
         except: pass
     try: subprocess.run('rm -rf /tmp/.com.google.Chrome* /tmp/chrome_crashpad* /tmp/.org.chromium* /tmp/Temp-* /tmp/ocx_inc_* /tmp/ocx_task_* /tmp/ocx_profile_*', shell=True, timeout=5, capture_output=True)
     except: pass
     time.sleep(1)
+
+def kill_driver_pid(d):
+    """قتل Chrome خاص بمهمة واحدة فقط دون المساس بمهام أخرى."""
+    if d is None: return
+    pid = None
+    try: pid = d.service.process.pid if hasattr(d, 'service') and d.service and hasattr(d.service, 'process') and d.service.process else None
+    except: pass
+    if not pid:
+        try: pid = d.browser_pid if hasattr(d, 'browser_pid') else None
+        except: pass
+    if pid:
+        try: subprocess.run(['kill', '-9', str(pid)], timeout=3, capture_output=True)
+        except: pass
 
 def setup_swap():
     try:
@@ -592,7 +606,8 @@ def _build_options(use_exclude_switches: bool = True):
 
 
 def create_driver(chat_id: str = ""):
-    nuke_all_chrome(); time.sleep(2)
+    # ⭐ لا nuke_all_chrome — يقتل مهام مستخدمين آخرين. تنظيف profile المؤقت فقط.
+    time.sleep(1)
 
     # ⭐ لا UA تزييف — Chromium على Linux ليه UA صحيح (X11; Linux x86_64).
     # تزييف UA = Windows على Linux = 100 mismatch مكشوف (platform, WebGL, fonts, screen).
@@ -665,12 +680,12 @@ def create_driver(chat_id: str = ""):
 def get_driver_safe(chat_id: str = ""):
     for i in range(1, 4):
         try:
-            print(f"🔧 [UC-Chrome] Attempt {i}/3...")
+            print(f"🔧 [UC-Chrome] Attempt {i}/3 chat={chat_id}...")
             d = create_driver(chat_id); d.get("about:blank")
-            print(f"✅ [UC-Chrome] OK"); return d
+            print(f"✅ [UC-Chrome] OK chat={chat_id}"); return d
         except Exception as e:
-            print(f"❌ [UC-Chrome] {i} failed: {e}")
-            nuke_all_chrome(); time.sleep(5)
+            print(f"❌ [UC-Chrome] {i} failed chat={chat_id}: {e}")
+            kill_driver_pid(d if 'd' in dir() else None); time.sleep(5)
     raise Exception("DRIVER_FAILED")
 
 def alive(d):
@@ -722,7 +737,8 @@ def destroy_driver(d, udd: str = None):
             pass
         try: d.quit()
         except: pass
-    nuke_all_chrome()
+        # ⭐ اقتل Chrome خاص بهذه المهمة فقط — لا تمسّ مهام المستخدمين الآخرين
+        kill_driver_pid(d)
     if profile_dir:
         try:
             shutil.rmtree(profile_dir, ignore_errors=True)
@@ -776,8 +792,7 @@ def run_single_task(chat_id, url, task_id, attempt_num):
     is_photo = False
 
     try:
-        with driver_lock:
-            driver = get_driver_safe(chat_id)
+        driver = get_driver_safe(chat_id)
 
         cs = get_session(chat_id)
         ex = get_server_by_url(url)
@@ -1167,7 +1182,12 @@ def run_single_task(chat_id, url, task_id, attempt_num):
     finally:
         destroy_driver(driver)
 
-def worker_loop():
+MAX_WORKERS = 3
+USER_COOLDOWN = {}  # chat_id → expiry timestamp
+COOLDOWN_SECONDS = 30
+
+def worker_loop(worker_id: int):
+    """كل worker يستهلك مهام من نفس الطابور بشكل مستقل."""
     while True:
         task = None
         try: task = task_queue.get(timeout=30)
@@ -1188,7 +1208,7 @@ def worker_loop():
                         rm = bot.send_message(cid, f"🔄 **إعادة محاولة ({att}/3)...**", parse_mode="Markdown")
                         time.sleep(2); sdm(cid, rm.message_id)
                     except: pass
-                    nuke_all_chrome(); time.sleep(5)
+                    time.sleep(5)
                     if not is_task_current(cid, tid): break
                     update_session(cid, {'status': 'processing', 'interaction_time': time.time()})
 
@@ -1200,7 +1220,7 @@ def worker_loop():
                     except: pass
 
         except Exception as e:
-            print(f"❌ [Worker FATAL] {e}")
+            print(f"❌ [Worker-{worker_id} FATAL] {e}")
             if task:
                 try: bot.send_message(task['chat_id'], "⚠️ خطأ. أعد الرابط.", parse_mode="Markdown")
                 except: pass
@@ -1213,17 +1233,29 @@ def worker_loop():
                 try: task_queue.task_done()
                 except: pass
 
-def start_worker():
-    global worker_thread
-    worker_thread = threading.Thread(target=worker_loop, daemon=True, name="OCX-Worker")
-    worker_thread.start()
+def start_workers():
+    """ينشئ MAX_WORKERS عمال متوازين."""
+    with worker_lock:
+        for i in range(MAX_WORKERS):
+            t = threading.Thread(target=worker_loop, args=(i,), daemon=True, name=f"OCX-Worker-{i}")
+            t.start()
+            workers.append(t)
+        print(f"✅ [Workers] {MAX_WORKERS} workers started")
 
-def ensure_worker():
-    global worker_thread
-    if worker_thread is None or not worker_thread.is_alive():
-        nuke_all_chrome(); start_worker()
+def ensure_workers():
+    """يتأكد أن كل العمال أحياء، ويعيد تشغيل أي عامل ميت."""
+    with worker_lock:
+        alive_count = sum(1 for w in workers if w.is_alive())
+        if alive_count < MAX_WORKERS:
+            needed = MAX_WORKERS - alive_count
+            for i in range(needed):
+                idx = len(workers)
+                t = threading.Thread(target=worker_loop, args=(idx,), daemon=True, name=f"OCX-Worker-{idx}")
+                t.start()
+                workers.append(t)
+            print(f"⚠️ [Workers] restarted {needed} dead workers")
 
-start_worker()
+start_workers()
 
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
@@ -1294,8 +1326,8 @@ def admin_kb(msg):
         v = get_all_vips()
         bot.reply_to(msg, "👥 **VIPs:**\n\n" + ("\n".join([f"🔹 `{u}`" for u in v]) if v else "فارغة."), parse_mode="Markdown")
     elif t == "📊 حالة النظام":
-        wa = "✅ حي" if (worker_thread and worker_thread.is_alive()) else "❌ ميت"
-        bot.reply_to(msg, f"📊 **النظام:**\n📦 طابور: `{task_queue.qsize()}`\n💾 `{'MongoDB 🟢' if USE_MONGO else 'RAM 🟡'}`\n👷 Worker: `{wa}`", parse_mode="Markdown")
+        wa = f"{sum(1 for w in workers if w.is_alive())}/{MAX_WORKERS} حي"
+        bot.reply_to(msg, f"📊 **النظام:**\n📦 طابور: `{task_queue.qsize()}`\n💾 `{'MongoDB 🟢' if USE_MONGO else 'RAM 🟡'}`\n👷 Workers: `{wa}`", parse_mode="Markdown")
     elif t == "➕ إضافة عميل":
         m = bot.send_message(cid, "✏️ **ID:**"); bot.register_next_step_handler(m, process_add_vip)
     elif t == "➖ إزالة عميل":
@@ -1355,7 +1387,7 @@ def handle_query(call):
             ud.update({'replace_mode': False, 'add_new_mode': True})
             try: bot.edit_message_text("➕ **إضافة جديد...**", chat_id=cid, message_id=call.message.message_id, parse_mode="Markdown")
             except: pass
-        update_session(cid, ud); ensure_worker()
+        update_session(cid, ud); ensure_workers()
         task_queue.put({'chat_id': cid, 'url': url, 'task_id': tid}); return
 
     if not session.get('active'):
@@ -1399,6 +1431,14 @@ def handle_url(msg):
         m = bot.send_message(cid, "⚠️ **مهمة قيد التنفيذ!**\n/cancel أولاً.", parse_mode="Markdown")
         threading.Timer(15.0, lambda mid=m.message_id: sdm(cid, mid)).start(); return
 
+    # ⭐ rate-limit: منع مستخدم واحد من ملء الطابور
+    now = time.time()
+    cooldown_exp = USER_COOLDOWN.get(str(cid), 0)
+    if now < cooldown_exp:
+        wait = int(cooldown_exp - now)
+        m = bot.send_message(cid, f"⏳ **انتظر {wait} ثانية قبل إرسال رابط جديد.**", parse_mode="Markdown")
+        threading.Timer(10.0, lambda mid=m.message_id: sdm(cid, mid)).start(); return
+
     ex = get_server_by_url(url)
     if ex and ex.get('project_id'):
         tid = gen_task_id()
@@ -1410,10 +1450,16 @@ def handle_url(msg):
         m = bot.send_message(cid, "⚠️ **رابط مستخدم!** كيف تفضل؟", reply_markup=mk, parse_mode="Markdown")
         update_session(cid, {'ui_msg_id': m.message_id}); return
 
+    # ⭐ فحص امتلاء الطابور
+    if task_queue.qsize() >= 20:
+        m = bot.send_message(cid, "📋 **الطابور ممتلئ حالياً.**\nحاول مرة أخرى بعد قليل.", parse_mode="Markdown")
+        threading.Timer(15.0, lambda mid=m.message_id: sdm(cid, mid)).start(); return
+
     tid = gen_task_id()
     m = bot.send_message(cid, "⏳ **تمت الإضافة للطابور...**", parse_mode="Markdown")
     update_session(cid, {'active': True, 'status': 'queued', 'target_url': url, 'ui_msg_id': m.message_id, 'interaction_time': time.time(), 'task_id': tid})
-    ensure_worker()
+    USER_COOLDOWN[str(cid)] = now + COOLDOWN_SECONDS
+    ensure_workers()
     task_queue.put({'chat_id': cid, 'url': url, 'task_id': tid})
 
 @bot.message_handler(func=lambda m: True, content_types=['text','photo','video','document','audio','sticker','voice'])
@@ -1448,7 +1494,7 @@ if __name__ == "__main__":
     poll_backoff = 3
     while True:
         try:
-            ensure_worker()
+            ensure_workers()
             # skip_pending=True + long_polling_timeout=20 = أقل احتمال للـ 409
             bot.polling(none_stop=True, timeout=20, skip_pending=True, long_polling_timeout=20)
             poll_backoff = 3
