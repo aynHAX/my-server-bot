@@ -24,13 +24,23 @@ from selenium.webdriver.common.keys import Keys
 
 # ── حزمة "خارق": undetected-chromedriver + تزييف User-Agent ──
 import undetected_chromedriver as uc
-from fake_useragent import UserAgent
 try:
-    _UA = UserAgent(fallback="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+    from fake_useragent import UserAgent as _UAFactory
+    _UA = _UAFactory(fallback="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
 except Exception:
     class _FallbackUA:
         def chrome(self): return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
     _UA = _FallbackUA()
+
+# WDGA UA: نلف .chrome سواء callable أو property = بنحصل على UA وقت ما نمسكه
+_UA_BASE = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+def _pick_chrome_ua() -> str:
+    """يعمل UA صالح سواء كانت .chrome callable (fake-useragent 1.x) أو property (نسخ أحدث)."""
+    try:
+        c = _UA.chrome
+        return c() if callable(c) else str(c)
+    except Exception:
+        return _UA_BASE
 
 # بنية تشفير بصمة المتصفح الموحدة (متزامنة JS + Python)
 import hashlib
@@ -717,7 +727,7 @@ def create_driver(chat_id: str = ""):
     nuke_all_chrome(); time.sleep(2)
 
     # ── User-Agent ثابت لكل مستخدم (مش عشوائي كل session = بصمة متماسكة) ──
-    ua = _UA.chrome()
+    ua = _pick_chrome_ua()
     # version مش 131 الحديثة الكذابة — نخليها تطابق Chrome current UA parser
     # مثال واقعي Chrome 131 على Win10:
     if 'HeadlessChrome' in ua: ua = ua.replace('HeadlessChrome', 'Chrome')
@@ -728,7 +738,9 @@ def create_driver(chat_id: str = ""):
     os.makedirs(udd, exist_ok=True)
 
     # ── خيارات undetected-chromedriver (مش selenium Options العادي) ──
-    opt = uc.ChromeOptions()
+    # ⚠️ استعمال selenium.ChromeOptions (مش uc.ChromeOptions اللي ممكن يكون str alias في بعض نسخ uc)
+    from selenium.webdriver.chrome.options import Options as _UCOptions
+    opt = _UCOptions()
 
     # ⛔️ ممنوع --headless: جوجل بيكشفها بـ permissions query + null outerHeight.
     # احنا مش محتاجينها أصلاً لإن عندنا Xvfb 1920x1080.
@@ -1542,6 +1554,25 @@ if __name__ == "__main__":
     nuke_all_chrome()
     try: bot.remove_webhook()
     except: pass
+
+    # اطرد أي polling قديم من نسخة سابقة قبل ما نبدأ (يقلل الـ 409 من نسختين شغلتين)
+    try:
+        bot.get_updates(offset=-1, timeout=1)
+    except Exception as _e:
+        print(f"⚠️ [Poll] flush pre-start: {_e}")
+
+    poll_backoff = 3
     while True:
-        try: ensure_worker(); bot.polling(none_stop=True, timeout=60)
-        except Exception as e: print(f"❌ [Poll] {e}"); time.sleep(3)
+        try:
+            ensure_worker()
+            # drop_pending_updates=True بيمسك آخر update_id ويشطب اللي محتسبة فوقه
+            # = يكسر حلقة الـ 409 conflict لما في polling معلّق
+            bot.polling(none_stop=True, timeout=60, skip_pending=True, long_polling_timeout=20)
+            poll_backoff = 3
+        except Exception as e:
+            print(f"❌ [Poll] {e}")
+            # 409 = نسخة تانية شغّالة — نزوّد الباكوف إكسبونينشيال (حتى 30s)
+            if '409' in str(e) or 'Conflict' in str(e):
+                print(f"⚠️ [Poll] نسخة تانية بتـ polling بنفس الـ token — لازم تقتلها. باكوف {poll_backoff}s")
+                poll_backoff = min(poll_backoff * 2, 30)
+            time.sleep(poll_backoff)
