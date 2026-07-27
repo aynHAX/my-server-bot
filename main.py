@@ -4,6 +4,7 @@ import threading
 import queue
 import io
 import random
+import shutil
 import http.server
 import socketserver
 import subprocess
@@ -88,7 +89,7 @@ def nuke_all_chrome():
     for p in ['chrome', 'chromium', 'chromedriver', 'google-chrome']:
         try: subprocess.run(['pkill', '-9', '-f', p], timeout=5, capture_output=True)
         except: pass
-    try: subprocess.run('rm -rf /tmp/.com.google.Chrome* /tmp/chrome_crashpad* /tmp/.org.chromium* /tmp/Temp-*', shell=True, timeout=5, capture_output=True)
+    try: subprocess.run('rm -rf /tmp/.com.google.Chrome* /tmp/chrome_crashpad* /tmp/.org.chromium* /tmp/Temp-* /tmp/ocx_inc_* /tmp/ocx_task_* /tmp/ocx_profile_*', shell=True, timeout=5, capture_output=True)
     except: pass
     time.sleep(1)
 
@@ -800,12 +801,15 @@ def _build_options(ua: str, use_exclude_switches: bool = True):
 def create_driver(chat_id: str = ""):
     nuke_all_chrome(); time.sleep(2)
 
-    # ── User-Agent ثابت لكل مستخدم (مش عشوائي كل session = بصمة متماسكة) ──
+    # ── User-Agent (مش عشوائي كل session = بصمة متماسكة) ──
     ua = _pick_chrome_ua()
     if 'HeadlessChrome' in ua: ua = ua.replace('HeadlessChrome', 'Chrome')
 
-    # ── user_data_dir ثابت لكل مستخدم = localStorage/IndexedDB/cookies تتوارث بين الجلسات ──
-    udd = f"/tmp/ocx_profile_{_fp_seed(chat_id) % 100000}"
+    # ── Qwiklabs REQUIRE incognito: profile فريش لكل مهمة + مسحه بعد المهمة ──
+    # القواعد: "Run the lab in private browsing" + "Actions outside the lab scope will trigger
+    # an automatic account block." → لازم temp dir جديد لكل مهمة عشان أي trace
+    # متراكم يبقى "deviation" ويبلوك الحساب = "Couldn't sign you in / Contact your domain admin".
+    udd = f"/tmp/ocx_task_{int(time.time())}_{random.randint(1000,9999)}"
     os.makedirs(udd, exist_ok=True)
 
     # ── تحديد مسار المتصفح + الـ driver على container + نسخة Chrome ──
@@ -826,21 +830,34 @@ def create_driver(chat_id: str = ""):
         print("ℹ️ [UC] Chrome >=140 → تخطّي excludeSwitches + useAutomationExtension + prefs")
 
     # ════════════════════════════════════════════════════════════════
-    #  المسار الأساسي (الأكثر استقراراً مع chromedriver 150):
-    #  vanilla selenium + chromedriver binary patched (cdc_ → xxx_) في Dockerfile
-    #  + STEALTH_JS عبر CDP + user_data_dir ثابت + --disable-blink-features=AutomationControlled
-    #  ده بيماثل ما بيعمله undetected-chromedriver بأقل كثير من المتاعب.
+    #  المسار الأساسي: vanilla selenium + chromedriver binary patched (cdc_ → xxx_)
+    #  + STEALTH_JS عبر CDP + INCognito (مطلوب من Qwiklabs)
+    #  Incognito = مفيش persistent profile، تماماً زي ما Qwiklabs بتوصي به.
+    #  STEALTH_JS بتفضل شغّالة = navigator.webdriver مخفي + سلاسل cdc_ ممسوحة.
     # ════════════════════════════════════════════════════════════════
-    print("🚀 [Driver] vanilla selenium + stealth (المسار الأساسي)")
+    print("🚀 [Driver] vanilla selenium + stealth + INCognito (المسار الأساسي)")
     sopt = _build_options(ua, use_exclude_switches=exclude_sw)
     if browser_path:
         sopt.binary_location = browser_path
-    # أضف user-data-dir ثابت = anti-incognito + بصمة متراكمة
-    try: sopt.add_argument(f'--user-data-dir={udd}')
+    # ⭐ INCognito mode — تماماً زي متطلبات Qwiklabs (private browser, لا تعارض مع حسابك الشخصي)
+    # NOTE: incognito بيلغي الحاجة لـ user_data_dir (كل session ثانوية، لا persistent state)
+    try: sopt.add_argument('--incognito')
+    except Exception: pass
+    # أضف user-data-dir مؤقت عشان نتجنّب "profile in use" line overlap (incognito بياخد profile واحد)
+    # بس لازم يكون unique لكل instance:
+    try:
+        tmp_profile = f"/tmp/ocx_inc_{uuid_module.uuid4().hex[:8]}"
+        os.makedirs(tmp_profile, exist_ok=True)
+        sopt.add_argument(f'--user-data-dir={tmp_profile}')
     except Exception: pass
     svc = Service(executable_path=driver_path, log_output=os.devnull) if driver_path else Service(log_output=os.devnull)
     d = webdriver.Chrome(options=sopt, service=svc)
-    print("✅ [Driver] selenium + chromedriver patched نشط")
+    # سجّل مسار الـ profile المؤقت على الـ driver عشان destroy_driver يمسحه بعد المهمة
+    try:
+        d._ocx_profile_dir = tmp_profile
+    except Exception:
+        pass
+    print("✅ [Driver] selenium + chromedriver patched + incognito نشط")
 
     # ── حقن stealth JS للوثائق الجديدة (على مستوى CDP — يشتغل قبل أي DOM) ──
     try:
@@ -911,11 +928,21 @@ def safe_cookies(d):
     try: return d.get_cookies()
     except: return []
 
-def destroy_driver(d):
-    if d:
+def destroy_driver(d, udd: str = None):
+    # امسح temp profile dir عشان Qwiklabs incognito rule (لا persistent state بين المهام)
+    profile_dir = udd
+    if d is not None:
+        try:
+            profile_dir = profile_dir or getattr(d, '_ocx_profile_dir', None)
+        except Exception:
+            pass
         try: d.quit()
         except: pass
     nuke_all_chrome()
+    if profile_dir:
+        try:
+            shutil.rmtree(profile_dir, ignore_errors=True)
+        except Exception: pass
 
 def sdm(cid, mid):
     if mid:
