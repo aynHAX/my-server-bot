@@ -725,25 +725,11 @@ def _get_chrome_version():
         return int(m.group(1)) if m else None
     except Exception: return None
 
-def create_driver(chat_id: str = ""):
-    nuke_all_chrome(); time.sleep(2)
-
-    # ── User-Agent ثابت لكل مستخدم (مش عشوائي كل session = بصمة متماسكة) ──
-    ua = _pick_chrome_ua()
-    # version مش 131 الحديثة الكذابة — نخليها تطابق Chrome current UA parser
-    # مثال واقعي Chrome 131 على Win10:
-    if 'HeadlessChrome' in ua: ua = ua.replace('HeadlessChrome', 'Chrome')
-
-    # ── user_data_dir ثابت لكل مستخدم = localStorage/IndexedDB/cookies تتوارث بين الجلسات ──
-    # ده أكبر سلاح ضد Google: المتصفح "يتذكر" الحساب + بصماته متراكمة = آدمي حقيقي
-    udd = f"/tmp/ocx_profile_{_fp_seed(chat_id) % 100000}"
-    os.makedirs(udd, exist_ok=True)
-
-    # ── خيارات undetected-chromedriver (مش selenium Options العادي) ──
-    # ⚠️ استعمال selenium.ChromeOptions (مش uc.ChromeOptions اللي ممكن يكون str alias في بعض نسخ uc)
+def _build_options(ua: str, use_exclude_switches: bool = True):
+    """يبني ChromeOptions جديد بالكامل في كل مرة (مش نعيد استعمال object قديم).
+    use_exclude_switches=False للـ chromedriver 150+ الذي لا يعترف بـ excludeSwitches."""
     from selenium.webdriver.chrome.options import Options as _UCOptions
     opt = _UCOptions()
-
     # ⛔️ ممنوع --headless: جوجل بيكشفها بـ permissions query + null outerHeight.
     # احنا مش محتاجينها أصلاً لإن عندنا Xvfb 1920x1080.
     for a in ['--no-sandbox',
@@ -778,24 +764,43 @@ def create_driver(chat_id: str = ""):
               '--aggressive-cache-discard',
               '--disable-application-cache',
               f'--user-agent={ua}']:
-        opt.add_argument(a)
-
+        try: opt.add_argument(a)
+        except Exception: pass
     opt.page_load_strategy = 'eager'
+    # excludeSwitches متوافق لحد chromedriver ~130. 150+ لا يعترف به → نحطه flag مستقل.
+    if use_exclude_switches:
+        try:
+            opt.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
+        except Exception: pass
+    try:
+        opt.add_experimental_option('useAutomationExtension', False)
+    except Exception: pass
+    try:
+        opt.add_experimental_option("prefs", {
+            "profile.default_content_setting_values.notifications": 2,
+            "credentials_enable_service": False,
+            "profile.password_manager_enabled": False,
+            "safebrowsing.enabled": False,
+            "profile.default_content_setting_values.geolocation": 2,
+            "profile.default_content_setting_values.media_stream": 2,
+        })
+    except Exception: pass
+    return opt
 
-    opt.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
-    opt.add_experimental_option('useAutomationExtension', False)
-    opt.add_experimental_option("prefs", {
-        "profile.default_content_setting_values.notifications": 2,
-        "credentials_enable_service": False,
-        "profile.password_manager_enabled": False,
-        "safebrowsing.enabled": False,
-        "profile.default_content_setting_values.geolocation": 2,
-        "profile.default_content_setting_values.media_stream": 2,
-    })
+
+def create_driver(chat_id: str = ""):
+    nuke_all_chrome(); time.sleep(2)
+
+    # ── User-Agent ثابت لكل مستخدم (مش عشوائي كل session = بصمة متماسكة) ──
+    ua = _pick_chrome_ua()
+    if 'HeadlessChrome' in ua: ua = ua.replace('HeadlessChrome', 'Chrome')
+
+    # ── user_data_dir ثابت لكل مستخدم = localStorage/IndexedDB/cookies تتوارث بين الجلسات ──
+    udd = f"/tmp/ocx_profile_{_fp_seed(chat_id) % 100000}"
+    os.makedirs(udd, exist_ok=True)
 
     # ── تحديد مسار المتصفح + الـ driver على container + نسخة Chrome ──
     browser_path, driver_path = _detect_browser_paths()
-    # CHROME_VERSION_MAIN env يتفوق على الكشف (لو عايز تثبّته صراحة على Railway)
     ver = os.environ.get("CHROME_VERSION_MAIN")
     if ver:
         try: ver = int(ver)
@@ -804,45 +809,86 @@ def create_driver(chat_id: str = ""):
         ver = _get_chrome_version()
     print(f"🔍 [UC] browser={browser_path} driver={driver_path} version={ver}")
 
-    uc_kwargs = dict(
-        options=opt,
-        use_subprocess=True,
-        service_log_path=os.devnull,
-        no_sandbox=True,
-        suppress_welcome=True,
-    )
-    if browser_path:  uc_kwargs["browser_executable_path"] = browser_path
-    if driver_path:   uc_kwargs["driver_executable_path"]  = driver_path
-    if ver:            uc_kwargs["version_main"]             = ver
+    # كشف نسخة chromedriver عشان نعرف هل نمرّر excludeSwitches ولا لا
+    # chromedriver >= 140 بيرفض excludeSwitches
+    exclude_sw = True
+    if ver and ver >= 140:
+        exclude_sw = False
+        print("ℹ️ [UC] Chrome >=140 → تخطّي excludeSwitches (غير معترف به)")
 
-    # ── محاولة أولى: مع user_data_dir ثابت لكل مستخدم ──
+    # ════════════════════════════════════════════════════════════════
+    #  طبقة 1: undetected-chromedriver مع user_data_dir ثابت
+    # ════════════════════════════════════════════════════════════════
     try:
-        uc_kwargs["user_data_dir"] = udd
+        opt = _build_options(ua, use_exclude_switches=exclude_sw)
+        uc_kwargs = dict(
+            options=opt,
+            user_data_dir=udd,
+            use_subprocess=True,
+            service_log_path=os.devnull,
+            no_sandbox=True,
+            suppress_welcome=True,
+        )
+        if browser_path: uc_kwargs["browser_executable_path"] = browser_path
+        if driver_path:  uc_kwargs["driver_executable_path"]  = driver_path
+        if ver:          uc_kwargs["version_main"]             = ver
         d = uc.Chrome(**uc_kwargs)
+        print("✅ [UC] undetected-chromedriver نشط مع profile ثابت")
     except Exception as e1:
-        # Fallback 1: بدون user_data_dir (ملف مغلوك / معلق)
-        print(f"⚠️ [UC] user_data_dir failed ({e1}); retry without profile")
+        # ════════════════════════════════════════════════════════════════
+        #  طبقة 2: uc بدون profile ثابت (ملف مغلوك)
+        # ════════════════════════════════════════════════════════════════
+        print(f"⚠️ [UC] layer1 fail ({str(e1)[:120]}); layer2: no profile")
         nuke_all_chrome(); time.sleep(2)
-        uc_kwargs.pop("user_data_dir", None)
         try:
-            d = uc.Chrome(**uc_kwargs)
+            opt2 = _build_options(ua, use_exclude_switches=exclude_sw)
+            uc_kwargs2 = dict(
+                options=opt2,
+                use_subprocess=True,
+                service_log_path=os.devnull,
+                no_sandbox=True,
+                suppress_welcome=True,
+            )
+            if browser_path: uc_kwargs2["browser_executable_path"] = browser_path
+            if driver_path:  uc_kwargs2["driver_executable_path"]  = driver_path
+            if ver:          uc_kwargs2["version_main"]             = ver
+            d = uc.Chrome(**uc_kwargs2)
+            print("✅ [UC] undetected-chromedriver نشط (بدون profile ثابت)")
         except Exception as e2:
-            # Fallback 2: رجوع للسيلينيوم العادي (آخر أمل) — headless off بـ Xvfb
-            print(f"⚠️ [UC] full fail ({e2}); fallback to vanilla selenium")
+            # ════════════════════════════════════════════════════════════════
+            #  طبقة 3: uc بدون excludeSwitches نهائياً (لو الجو حوله)
+            # ════════════════════════════════════════════════════════════════
+            print(f"⚠️ [UC] layer2 fail ({str(e2)[:120]}); layer3: no excludeSwitches")
             nuke_all_chrome(); time.sleep(2)
-            sopt = Options()
-            # وجّه المتصفح لـ chromium على container لو موجود
-            for a in ['--no-sandbox','--disable-dev-shm-usage','--user-data-dir='+udd,
-                      '--disable-blink-features=AutomationControlled','--window-size=1920,1080',
-                      f'--user-agent={ua}']:
-                sopt.add_argument(a)
-            if browser_path:
-                sopt.binary_location = browser_path
-            sopt.add_experimental_option("excludeSwitches", ["enable-automation","enable-logging"])
-            sopt.add_experimental_option('useAutomationExtension', False)
-            sopt.page_load_strategy = 'eager'
-            svc = Service(executable_path=driver_path, log_output=os.devnull) if driver_path else Service(log_output=os.devnull)
-            d = webdriver.Chrome(options=sopt, service=svc)
+            try:
+                opt3 = _build_options(ua, use_exclude_switches=False)
+                uc_kwargs3 = dict(
+                    options=opt3,
+                    use_subprocess=True,
+                    service_log_path=os.devnull,
+                    no_sandbox=True,
+                    suppress_welcome=True,
+                )
+                if browser_path: uc_kwargs3["browser_executable_path"] = browser_path
+                if driver_path:  uc_kwargs3["driver_executable_path"]  = driver_path
+                if ver:          uc_kwargs3["version_main"]             = ver
+                d = uc.Chrome(**uc_kwargs3)
+                print("✅ [UC] undetected-chromedriver نشط (بدون excludeSwitches)")
+            except Exception as e3:
+                # ════════════════════════════════════════════════════════════════
+                #  طبقة 4 (آخر أمل): vanilla selenium مع stealth JS كامل
+                # ════════════════════════════════════════════════════════════════
+                print(f"⚠️ [UC] layer3 fail ({str(e3)[:120]}); layer4 (FINAL): vanilla selenium + stealth JS")
+                nuke_all_chrome(); time.sleep(2)
+                sopt = _build_options(ua, use_exclude_switches=exclude_sw)
+                if browser_path:
+                    sopt.binary_location = browser_path
+                # أضف user-data-dir للحفاظ على تحايل الـ incognito
+                try: sopt.add_argument(f'--user-data-dir={udd}')
+                except Exception: pass
+                svc = Service(executable_path=driver_path, log_output=os.devnull) if driver_path else Service(log_output=os.devnull)
+                d = webdriver.Chrome(options=sopt, service=svc)
+                print("⚠️ [UC] تشغيل على vanilla selenium (anti-detection أضعف لكن STEALTH_JS شغّال)")
 
     # ── حقن stealth JS للوثائق الجديدة (على مستوى CDP — يشتغل قبل أي DOM) ──
     try:
@@ -1054,6 +1100,29 @@ def run_single_task(chat_id, url, task_id, attempt_num):
                 # ✅ FIX: استعمال innerText (النص المرئي فقط) بدل page_source
                 visible_text = safe_exec(driver, "return document.body ? document.body.innerText : '';") or ""
                 vt_lower = visible_text.lower()
+
+                # ✅ صفحة "Verify it's you" / "تأكد من أنه أنت" — بتيجي بعد الـ login من IP جديد.
+                # في صفحة فيها زر Continue + النص ده (مش حظر) = نضغط Continue
+                if (("verify it's you" in vt_lower or
+                     "confirm" in vt_lower and "account" in vt_lower or
+                     "تأكد" in visible_text or
+                     "للتأكد" in visible_text) and
+                    "couldn't sign you in" not in vt_lower):
+                    cont_btn = safe_find(driver, By.XPATH,
+                        "//button[contains(translate(.,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'continue') or "
+                        "contains(.,'متابعة') or contains(.,'Continue')]")
+                    if cont_btn:
+                        for b in cont_btn:
+                            try:
+                                if b.is_displayed() and b.is_enabled():
+                                    uls(chat_id, status_msg_id, "🟡 **تأكيد الحساب...**", driver=driver, is_photo=is_photo)
+                                    safe_exec(driver, "arguments[0].click();", b)
+                                    time.sleep(3)
+                                    sdm(chat_id, status_msg_id)
+                                    status_msg_id = 0
+                                    continue
+                            except Exception: pass
+
 
                 # ✅ FIX: فحص الحظر — فقط بالنص المرئي + التأكد من عدم وجود حقول دخول
                 if ("couldn't sign you in" in vt_lower or
