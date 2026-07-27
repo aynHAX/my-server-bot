@@ -22,23 +22,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
 
-# ── حزمة "خارق": undetected-chromedriver + تزييف User-Agent ──
-import undetected_chromedriver as uc
-from fake_useragent import UserAgent
-try:
-    _UA = UserAgent(fallback="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
-except Exception:
-    class _FallbackUA:
-        def chrome(self): return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-    _UA = _FallbackUA()
-
-# بنية تشفير بصمة المتصفح الموحدة (متزامنة JS + Python)
-import hashlib
-def _fp_seed(chat_id: str = "") -> int:
-    """بذرة ثابتة لكل مستخدم = بصمة متماسكة عبر جلساته (مش عشوائية كل مرة)."""
-    base = (chat_id or str(os.environ.get("ADMIN_ID", "ocx"))).encode()
-    return int(hashlib.md5(base).hexdigest(), 16)
-
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '')
 ADMIN_ID = os.environ.get('ADMIN_ID', '')
 MONGO_URI = os.environ.get('MONGO_URI', '')
@@ -462,312 +445,76 @@ def run_hc():
     with socketserver.TCPServer(("", int(os.environ.get("PORT", 8080))), HCHandler) as h: h.serve_forever()
 threading.Thread(target=run_hc, daemon=True).start()
 
-# ── Xvfb بحجم كبير = شاشة حقيقية 1920x1080 (مش 800x600 اللي بتكشف headless) ──
-display = Display(visible=0, size=(1920, 1080), color_depth=24)
+display = Display(visible=0, size=(800, 600))
 display.start()
 
-STEALTH_JS = r"""
-(() => {
-// ═══════════════════════════════════════════════════════════════════
-//  حزمة "خارق" — Stealth JS كامل (يتم حقنه قبل أي صفحة)
-//  هدف: مطابقة بصمة Chrome حقيقي على Windows 10 بدقة أقصى
-// ═══════════════════════════════════════════════════════════════════
+STEALTH_JS = """
+Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+delete navigator.__proto__.webdriver;
 
-// ── 1) إخفاء السيلينيوم / webdriver من كل نافذة ──
-try { Object.defineProperty(navigator, 'webdriver', {get: () => undefined}); } catch(e){}
-try { delete navigator.__proto__.webdriver; } catch(e){}
+window.chrome = {runtime: {}, loadTimes: function(){return {}}, csi: function(){return {}}, app: {}};
 
-// ── 2) window.chrome كامل (مطابق Chrome الحقيقي) ──
-window.chrome = window.chrome || {};
-window.chrome.runtime = window.chrome.runtime || {
-    OnInstalledReason: {CHROME_UPDATE: 'chrome_update', INSTALL: 'install', SHARED_MODULE_UPDATE: 'shared_module_update', UPDATE: 'update'},
-    OnRestartReason: {APP_UPDATE: 'app_update', OS_UPDATE: 'os_update', RUNTIME_UPDATE: 'runtime_update'},
-    PlatformArch: {ARM64: 'arm64', ARMV7_32: 'armv7-32', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64'},
-    PlatformNaclArch: {ARM: 'arm', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64'},
-    PlatformOs: {ANDROID: 'android', CROS: 'cros', LINUX: 'linux', MAC: 'mac', OPENBSD: 'openbsd', WIN: 'win'},
-    RequestUpdateCheckStatus: {NO_UPDATE: 'no_update', THROTTLED: 'throttled', UPDATE_AVAILABLE: 'update_available'},
-    connect: () => {},
-    sendMessage: () => {},
-    id: undefined
-};
-
-// ── 3) plugins كاملة + iterator حقيقي (مطابقة Chrome 131) ──
-try {
 Object.defineProperty(navigator, 'plugins', {get: () => {
-    const mk = (n, fn, d) => ({name:n, filename:fn, description:d, length:1, item:(i)=>({filename:fn, suffixes:[], type:''}), namedItem:(n)=>({filename:fn, suffixes:[], type:''})});
-    const p = {length: 5,
-        0: mk('PDF Viewer', 'internal-pdf-viewer', 'Portable Document Format'),
-        1: mk('Chrome PDF Viewer', 'internal-pdf-viewer', 'Portable Document Format'),
-        2: mk('Chromium PDF Viewer', 'internal-pdf-viewer', 'Portable Document Format'),
-        3: mk('Microsoft Edge PDF Viewer', 'internal-pdf-viewer', 'Portable Document Format'),
-        4: mk('WebKit built-in PDF', 'internal-pdf-viewer', 'Portable Document Format')};
-    p[Symbol.iterator] = function*(){ for(let i=0;i<this.length;i++) yield this[i]; };
-    p.refresh = ()=>{};
-    p.item = (i)=>p[i];
-    p.namedItem = (n)=>p[0];
-    return p;
+    const p = {length: 5, 0: {name:'Chrome PDF Plugin', filename:'internal-pdf-viewer', description:'Portable Document Format'},
+               1: {name:'Chrome PDF Viewer', filename:'mhjfbmdgcfjbbpaeojofohoefgiehjai', description:''},
+               2: {name:'Native Client', filename:'internal-nacl-plugin', description:''},
+               3: {name:'Chromium PDF Plugin', filename:'internal-pdf-viewer', description:'Portable Document Format'},
+               4: {name:'Chromium PDF Viewer', filename:'mhjfbmdgcfjbbpaeojofohoefgiehjai', description:''}};
+    p[Symbol.iterator] = function*(){for(let i=0;i<this.length;i++)yield this[i]}; return p;
 }});
-} catch(e){}
 
-// ── 4) mimeTypes متناسق مع plugins ──
-try {
-Object.defineProperty(navigator, 'mimeTypes', {get: () => {
-    const m = {length: 2,
-        0: {type:'application/pdf', suffixes:'pdf', description:'Portable Document Format', enabledPlugin: null},
-        1: {type:'text/pdf', suffixes:'pdf', description:'Portable Document Format', enabledPlugin: null}};
-    m[Symbol.iterator] = function*(){ for(let i=0;i<this.length;i++) yield this[i]; };
-    m.item = (i)=>m[i];
-    m.namedItem = (n)=>m[0];
-    return m;
-}});
-} catch(e){}
+Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+Object.defineProperty(navigator, 'language', {get: () => 'en-US'});
+Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
+Object.defineProperty(navigator, 'productSub', {get: () => '20030107'});
+Object.defineProperty(navigator, 'vendor', {get: () => 'Google Inc.'});
+Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 4});
+Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
+Object.defineProperty(navigator, 'maxTouchPoints', {get: () => 0});
+Object.defineProperty(navigator, 'doNotTrack', {get: () => null});
 
-// ── 5) خصائص navigator الكاملة + التناسق ──
-try { Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']}); } catch(e){}
-try { Object.defineProperty(navigator, 'language', {get: () => 'en-US'}); } catch(e){}
-try { Object.defineProperty(navigator, 'platform', {get: () => 'Win32'}); } catch(e){}
-try { Object.defineProperty(navigator, 'productSub', {get: () => '20030107'}); } catch(e){}
-try { Object.defineProperty(navigator, 'vendor', {get: () => 'Google Inc.'}); } catch(e){}
-try { Object.defineProperty(navigator, 'product', {get: () => 'Gecko'}); } catch(e){}
-try { Object.defineProperty(navigator, 'appName', {get: () => 'Netscape'}); } catch(e){}
-try { Object.defineProperty(navigator, 'appCodeName', {get: () => 'Mozilla'}); } catch(e){}
-try { Object.defineProperty(navigator, 'appVersion', {get: () => '5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'}); } catch(e){}
-try { Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 4}); } catch(e){}
-try { Object.defineProperty(navigator, 'deviceMemory', {get: () => 8}); } catch(e){}
-try { Object.defineProperty(navigator, 'maxTouchPoints', {get: () => 0}); } catch(e){}
-try { Object.defineProperty(navigator, 'doNotTrack', {get: () => null}); } catch(e){}
-try { Object.defineProperty(navigator, 'cookieEnabled', {get: () => true}); } catch(e){}
-try { Object.defineProperty(navigator, 'onLine', {get: () => true}); } catch(e){}
+Object.defineProperty(screen, 'availWidth', {get: () => 1920});
+Object.defineProperty(screen, 'availHeight', {get: () => 1040});
+Object.defineProperty(screen, 'width', {get: () => 1920});
+Object.defineProperty(screen, 'height', {get: () => 1080});
+Object.defineProperty(screen, 'colorDepth', {get: () => 24});
+Object.defineProperty(screen, 'pixelDepth', {get: () => 24});
 
-// ── 6) screen متناسق + window.outer/inner متناسقة ──
-try { Object.defineProperty(screen, 'availWidth',  {get: () => 1920}); } catch(e){}
-try { Object.defineProperty(screen, 'availHeight', {get: () => 1040}); } catch(e){}
-try { Object.defineProperty(screen, 'width',      {get: () => 1920}); } catch(e){}
-try { Object.defineProperty(screen, 'height',     {get: () => 1080}); } catch(e){}
-try { Object.defineProperty(screen, 'availLeft',   {get: () => 0}); } catch(e){}
-try { Object.defineProperty(screen, 'availTop',    {get: () => 40}); } catch(e){}
-try { Object.defineProperty(screen, 'colorDepth',   {get: () => 24}); } catch(e){}
-try { Object.defineProperty(screen, 'pixelDepth',  {get: () => 24}); } catch(e){}
-try { Object.defineProperty(screen, 'orientation', {get: () => ({type:'landscape-primary', angle:0})}); } catch(e){}
-
-try { Object.defineProperty(window, 'outerWidth',  {get: () => 1920}); } catch(e){}
-try { Object.defineProperty(window, 'outerHeight', {get: () => 1080}); } catch(e){}
-try { Object.defineProperty(window, 'innerWidth',  {get: () => 1920}); } catch(e){}
-try { Object.defineProperty(window, 'innerHeight', {get: () => 953}); } catch(e){}
-try { Object.defineProperty(window, 'devicePixelRatio', {get: () => 1}); } catch(e){}
-try { Object.defineProperty(window, 'screenX', {get: () => 0}); } catch(e){}
-try { Object.defineProperty(window, 'screenY', {get: () => 0}); } catch(e){}
-try { Object.defineProperty(window, 'screenLeft', {get: () => 0}); } catch(e){}
-try { Object.defineProperty(window, 'screenTop', {get: () => 0}); } catch(e){}
-
-// ── 7) permissions API متناسق مع حالة notification ـ prompt ──
-//     (جوجل بيكشف ال mismatch بين permissions.query و notification.permission)
-try {
-const _permQuery = navigator.permissions?.query?.bind(navigator.permissions);
 Object.defineProperty(navigator, 'permissions', {get: () => ({
-    query: (p) => {
-        if (p && p.name === 'notifications') return Promise.resolve({state: 'prompt', onchange: null});
-        return Promise.resolve({state: 'prompt', onchange: null});
-    }
-}));
-} catch(e){}
+    query: (p) => Promise.resolve({state: p.state || 'prompt', onchange: null})
+})});
 
-// ── 8) WebGL renderer مطابق Intel HD (متناسق مع hardwareConcurrency) ──
-try {
-const _getParameter = WebGLRenderingContext.prototype.getParameter;
+const getParameter = WebGLRenderingContext.prototype.getParameter;
 WebGLRenderingContext.prototype.getParameter = function(p) {
-    if (p === 37445) return 'Intel Inc.';                                  // UNMASKED_VENDOR
-    if (p === 37446) return 'Intel(R) HD Graphics 620 (Kaby Lake GT2)';    // UNMASKED_RENDERER
-    if (p === 7936)  return 'Intel Inc.';
-    if (p === 7937)  return 'Intel(R) HD Graphics 620';
-    return _getParameter.call(this, p);
+    if (p === 37445) return 'Intel Inc.';
+    if (p === 37446) return 'Intel Iris OpenGL Engine';
+    return getParameter.call(this, p);
 };
-const _getParameter2 = WebGL2RenderingContext?.prototype?.getParameter;
-if (_getParameter2) {
-    WebGL2RenderingContext.prototype.getParameter = function(p) {
-        if (p === 37445) return 'Intel Inc.';
-        if (p === 37446) return 'Intel(R) HD Graphics 620 (Kaby Lake GT2)';
-        if (p === 7936)  return 'Intel Inc.';
-        if (p === 7937)  return 'Intel(R) HD Graphics 620';
-        return _getParameter2.call(this, p);
-    };
-}
-} catch(e){}
 
-// ── 9) Timezone متناسق: getTimezoneOffset -120 = UTC+2 (ll Tunis/Cairo) ──
-//     + Intl.DateTimeFormat و timezone string متناسقة (مطابقة prefs --lang=en-US anomalous لكن لتفادي ال mismatch نستعمل Africa/Cairo)
-try {
+const now = new Date();
 Object.defineProperty(Date.prototype, 'getTimezoneOffset', {get: () => -120});
-try { Intl.DateTimeFormat().resolvedOptions().timeZone; } catch(e){}
-// تعديل resolvedOptions timeZone لتكون متناسقة مع GMT+2
-const _origResolve = Intl.DateTimeFormat.prototype.resolvedOptions;
-try {
-Intl.DateTimeFormat.prototype.resolvedOptions = function() {
-    const r = _origResolve.call(this);
-    r.timeZone = 'Africa/Cairo';   // UTC+2 يطابق offset -120
-    return r;
-};
-} catch(e){}
-} catch(e){}
-
-// ── 10) Canvas noise خفيف — يكسر fingerprint ثابت بدون أن ي выгляд "patched" ──
-//       (تحريك pixel واحد منهجي على معالج toDataURL/getImageData)
-try {
-const _toDataURL = HTMLCanvasElement.prototype.toDataURL;
-HTMLCanvasElement.prototype.toDataURL = function(...args) {
-    try {
-        const ctx = this.getContext('2d');
-        if (ctx && this.width > 0 && this.height > 0) {
-            const img = ctx.getImageData(0, 0, this.width, this.height);
-            // noise أطباع: الأولى منها +1/-1 بشكل دوري = تبدلات pixel بصري غير مرئي
-            for (let i = 0; i < img.data.length; i += 4 * 47) {
-                img.data[i] = (img.data[i] + 1) & 0xff;
-            }
-            ctx.putImageData(img, 0, 0);
-        }
-    } catch(e){}
-    return _toDataURL.apply(this, args);
-};
-
-const _getImageData = CanvasRenderingContext2D.prototype.getImageData;
-CanvasRenderingContext2D.prototype.getImageData = function(...args) {
-    const img = _getImageData.apply(this, args);
-    try {
-        for (let i = 0; i < img.data.length; i += 4 * 53) {
-            img.data[i+1] = (img.data[i+1] + 1) & 0xff;
-        }
-    } catch(e){}
-    return img;
-};
-} catch(e){}
-
-// ── 11) AudioContext fingerprint noise (نفس مبدأ canvas) ──
-try {
-const _analyser = (window.AnalyserNode?.prototype?.getFloatFrequencyData);
-if (_analyser) {
-    const _origGet = _analyser;
-    window.AnalyserNode.prototype.getFloatFrequencyData = function(arr) {
-        _origGet.call(this, arr);
-        for (let i = 0; i < arr.length; i += 97) arr[i] += (Math.random()-0.5) * 1e-7;
-    };
-}
-} catch(e){}
-
-// ── 12) navigator.connection (body لم يتم موجوده؟ Chrome بيظهره) ──
-try {
-if (!('connection' in navigator)) {
-    Object.defineProperty(navigator, 'connection', {get: () => ({
-        effectiveType: '4g', rtt: 50, downlink: 10, saveData: false, type: 'wifi', onchange: null
-    })});
-}
-} catch(e){}
-
-// ── 13) Notification.permission متناسق ──
-try { if (window.Notification) Object.defineProperty(Notification, 'permission', {get: () => 'default'}); } catch(e){}
-
-// ── 14) إخفاء أن window.chrome.runtime.id نص و patch traces ──
-try { Object.defineProperty(navigator, 'userAgent', {get: () => navigator.userAgent.replace(/HeadlessChrome/i, 'Chrome')}); } catch(e){}
-
-// ── 15) iframe contentWindow stealth (الصفحات الفرعية كمان) ──
-try {
-const _attachShadow = Element.prototype.attachShadow;
-Element.prototype.attachShadow = function(...a) { return _attachShadow.apply(this, a); };
-} catch(e){}
-
-// ── 16) مفتاح cdc_ cialis detection (regExp على window.warn names) ──
-try {
-const _warn = console.warn;
-console.warn = function(...a) {
-    const s = a.join(' ');
-    if (/cdc_/i.test(s) || /chrome_driver/i.test(s)) return;
-    return _warn.apply(console, a);
-};
-} catch(e){}
-
-})();
 """
 
-def _detect_browser_paths():
-    """يكتشف chromium + chromedriver على container Railway/Ubuntu.
-    يعيد tuple (browser_path, driver_path) أو (None, None)."""
-    import shutil
-    browser = None
-    for cand in ['chromium', 'chromium-browser', 'google-chrome', 'google-chrome-stable', '/usr/bin/chromium']:
-        p = shutil.which(cand)
-        if p: browser = p; break
-    driver = None
-    for cand in ['chromedriver', '/usr/bin/chromedriver']:
-        p = shutil.which(cand)
-        if p: driver = p; break
-    # على Railway صورة python:3.11-slim + apt chromium:
-    #   browser = /usr/bin/chromium, driver = /usr/bin/chromedriver
-    return browser, driver
-
-# نسخة Chrome الحالية المثبتة على container (لتجنب تحميل patcher خاطئ)
-def _get_chrome_version():
-    browser, _ = _detect_browser_paths()
-    if not browser: return None
-    try:
-        r = subprocess.run([browser, '--version'], capture_output=True, text=True, timeout=10)
-        m = re.search(r'(\d+)\.', r.stdout)
-        return int(m.group(1)) if m else None
-    except Exception: return None
-
-def create_driver(chat_id: str = ""):
+def create_driver():
     nuke_all_chrome(); time.sleep(2)
-
-    # ── User-Agent ثابت لكل مستخدم (مش عشوائي كل session = بصمة متماسكة) ──
-    ua = _UA.chrome()
-    # version مش 131 الحديثة الكذابة — نخليها تطابق Chrome current UA parser
-    # مثال واقعي Chrome 131 على Win10:
-    if 'HeadlessChrome' in ua: ua = ua.replace('HeadlessChrome', 'Chrome')
-
-    # ── user_data_dir ثابت لكل مستخدم = localStorage/IndexedDB/cookies تتوارث بين الجلسات ──
-    # ده أكبر سلاح ضد Google: المتصفح "يتذكر" الحساب + بصماته متراكمة = آدمي حقيقي
-    udd = f"/tmp/ocx_profile_{_fp_seed(chat_id) % 100000}"
-    os.makedirs(udd, exist_ok=True)
-
-    # ── خيارات undetected-chromedriver (مش selenium Options العادي) ──
-    opt = uc.ChromeOptions()
-
-    # ⛔️ ممنوع --headless: جوجل بيكشفها بـ permissions query + null outerHeight.
-    # احنا مش محتاجينها أصلاً لإن عندنا Xvfb 1920x1080.
-    for a in ['--no-sandbox',
-              '--disable-dev-shm-usage',
-              '--disable-gpu',
-              '--disable-software-rasterizer',
-              '--disable-extensions',
-              '--disable-background-networking',
-              '--disable-default-apps',
-              '--disable-sync',
-              '--disable-translate',
-              '--disable-hang-monitor',
-              '--disable-component-update',
-              '--disable-backgrounding-occluded-windows',
-              '--disable-renderer-backgrounding',
-              '--disable-background-timer-throttling',
-              '--disable-ipc-flooding-protection',
-              '--disable-client-side-phishing-detection',
-              '--disable-popup-blocking',
-              '--no-first-run',
-              '--no-default-browser-check',
-              '--disable-prompt-on-repost',
+    opt = Options()
+    for a in ['--headless=new','--no-sandbox','--disable-dev-shm-usage','--disable-gpu',
+              '--disable-software-rasterizer','--disable-extensions','--disable-background-networking',
+              '--disable-default-apps','--disable-sync','--disable-translate','--disable-hang-monitor',
+              '--disable-component-update','--disable-backgrounding-occluded-windows',
+              '--disable-renderer-backgrounding','--disable-background-timer-throttling',
+              '--disable-ipc-flooding-protection','--disable-client-side-phishing-detection',
+              '--disable-popup-blocking','--no-first-run',
               '--renderer-process-limit=1',
-              '--disable-features=site-per-process,VizDisplayCompositor,TranslateUI,AutofillServerCommunication,IsolateOrigins,site-isolation-trial-opt-outs',
-              '--js-flags=--max-old-space-size=256',
-              '--window-size=1920,1080',
-              '--window-position=0,0',
-              '--lang=en-US,en',
-              '--accept-lang=en-US,en',
-              '--disk-cache-size=0',
-              '--media-cache-size=0',
-              '--aggressive-cache-discard',
-              '--disable-application-cache',
-              f'--user-agent={ua}']:
+              '--disable-features=site-per-process,VizDisplayCompositor,TranslateUI,AutofillServerCommunication',
+              '--js-flags=--max-old-space-size=256','--window-size=1920,1080',
+              '--disable-blink-features=AutomationControlled',
+              '--disk-cache-size=0','--media-cache-size=0',
+              '--aggressive-cache-discard','--disable-cache','--disable-application-cache',
+              '--lang=en-US',
+              '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36']:
         opt.add_argument(a)
-
     opt.page_load_strategy = 'eager'
-
     opt.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
     opt.add_experimental_option('useAutomationExtension', False)
     opt.add_experimental_option("prefs", {
@@ -775,89 +522,22 @@ def create_driver(chat_id: str = ""):
         "credentials_enable_service": False,
         "profile.password_manager_enabled": False,
         "safebrowsing.enabled": False,
-        "profile.default_content_setting_values.geolocation": 2,
-        "profile.default_content_setting_values.media_stream": 2,
     })
-
-    # ── تحديد مسار المتصفح + الـ driver على container + نسخة Chrome ──
-    browser_path, driver_path = _detect_browser_paths()
-    # CHROME_VERSION_MAIN env يتفوق على الكشف (لو عايز تثبّته صراحة على Railway)
-    ver = os.environ.get("CHROME_VERSION_MAIN")
-    if ver:
-        try: ver = int(ver)
-        except: ver = None
-    if not ver:
-        ver = _get_chrome_version()
-    print(f"🔍 [UC] browser={browser_path} driver={driver_path} version={ver}")
-
-    uc_kwargs = dict(
-        options=opt,
-        use_subprocess=True,
-        service_log_path=os.devnull,
-        no_sandbox=True,
-        suppress_welcome=True,
-    )
-    if browser_path:  uc_kwargs["browser_executable_path"] = browser_path
-    if driver_path:   uc_kwargs["driver_executable_path"]  = driver_path
-    if ver:            uc_kwargs["version_main"]             = ver
-
-    # ── محاولة أولى: مع user_data_dir ثابت لكل مستخدم ──
-    try:
-        uc_kwargs["user_data_dir"] = udd
-        d = uc.Chrome(**uc_kwargs)
-    except Exception as e1:
-        # Fallback 1: بدون user_data_dir (ملف مغلوك / معلق)
-        print(f"⚠️ [UC] user_data_dir failed ({e1}); retry without profile")
-        nuke_all_chrome(); time.sleep(2)
-        uc_kwargs.pop("user_data_dir", None)
-        try:
-            d = uc.Chrome(**uc_kwargs)
-        except Exception as e2:
-            # Fallback 2: رجوع للسيلينيوم العادي (آخر أمل) — headless off بـ Xvfb
-            print(f"⚠️ [UC] full fail ({e2}); fallback to vanilla selenium")
-            nuke_all_chrome(); time.sleep(2)
-            sopt = Options()
-            # وجّه المتصفح لـ chromium على container لو موجود
-            for a in ['--no-sandbox','--disable-dev-shm-usage','--user-data-dir='+udd,
-                      '--disable-blink-features=AutomationControlled','--window-size=1920,1080',
-                      f'--user-agent={ua}']:
-                sopt.add_argument(a)
-            if browser_path:
-                sopt.binary_location = browser_path
-            sopt.add_experimental_option("excludeSwitches", ["enable-automation","enable-logging"])
-            sopt.add_experimental_option('useAutomationExtension', False)
-            sopt.page_load_strategy = 'eager'
-            svc = Service(executable_path=driver_path, log_output=os.devnull) if driver_path else Service(log_output=os.devnull)
-            d = webdriver.Chrome(options=sopt, service=svc)
-
-    # ── حقن stealth JS للوثائق الجديدة (على مستوى CDP — يشتغل قبل أي DOM) ──
-    try:
-        d.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": STEALTH_JS})
-    except Exception as e:
-        print(f"⚠️ [Stealth CDP] {e}")
-
-    # ── طمر الـ viewport + timezone على مستوى Emulation domain (CDP) ──
-    try:
-        d.execute_cdp_cmd("Emulation.setTimezoneOverride", {"timezoneId": "Africa/Cairo"})
-    except Exception: pass
-    try:
-        d.execute_cdp_cmd("Emulation.setLocaleOverride", {"locale": "en-US"})
-    except Exception: pass
-
-    d.set_page_load_timeout(150)
-    d.set_script_timeout(30)
-    d.implicitly_wait(3)
+    svc = Service(log_output=os.devnull)
+    d = webdriver.Chrome(options=opt, service=svc)
+    d.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": STEALTH_JS})
+    d.execute_cdp_cmd("Network.setBypassServiceWorker", {"bypass": True})
+    d.set_page_load_timeout(150); d.set_script_timeout(30); d.implicitly_wait(3)
     return d
 
-def get_driver_safe(chat_id: str = ""):
+def get_driver_safe():
     for i in range(1, 4):
         try:
-            print(f"🔧 [UC-Chrome] Attempt {i}/3...")
-            d = create_driver(chat_id); d.get("about:blank")
-            print(f"✅ [UC-Chrome] OK"); return d
+            print(f"🔧 [Chrome] Attempt {i}/3...")
+            d = create_driver(); d.get("about:blank")
+            print(f"✅ [Chrome] OK"); return d
         except Exception as e:
-            print(f"❌ [UC-Chrome] {i} failed: {e}")
-            nuke_all_chrome(); time.sleep(5)
+            print(f"❌ [Chrome] {i} failed: {e}"); nuke_all_chrome(); time.sleep(5)
     raise Exception("DRIVER_FAILED")
 
 def alive(d):
@@ -954,7 +634,7 @@ def run_single_task(chat_id, url, task_id, attempt_num):
 
     try:
         with driver_lock:
-            driver = get_driver_safe(chat_id)
+            driver = get_driver_safe()
 
         cs = get_session(chat_id)
         ex = get_server_by_url(url)
