@@ -607,64 +607,27 @@ if (_getParameter2) {
 }
 } catch(e){}
 
-// ── 9) Timezone متناسق: getTimezoneOffset -120 = UTC+2 (ll Tunis/Cairo) ──
-//     + Intl.DateTimeFormat و timezone string متناسقة (مطابقة prefs --lang=en-US anomalous لكن لتفادي ال mismatch نستعمل Africa/Cairo)
+// ── 9) Timezone متناسق: getTimezoneOffset 0 = UTC (يطابق توقيت حاوية Railway الفعلي UTC) ──
+//     إجبار UTC+2 (Africa/Cairo) كان بيعمل mismatch detectable مع توقيت السيرفر الفعلي (UTC).
+//     + Intl.DateTimeFormat و timezone string متناسقة (تطابق prefs + offset)
 try {
-Object.defineProperty(Date.prototype, 'getTimezoneOffset', {get: () => -120});
+Object.defineProperty(Date.prototype, 'getTimezoneOffset', {get: () => 0});
 try { Intl.DateTimeFormat().resolvedOptions().timeZone; } catch(e){}
-// تعديل resolvedOptions timeZone لتكون متناسقة مع GMT+2
+// تعديل resolvedOptions timeZone لتكون متناسقة مع UTC (offset 0)
 const _origResolve = Intl.DateTimeFormat.prototype.resolvedOptions;
 try {
 Intl.DateTimeFormat.prototype.resolvedOptions = function() {
     const r = _origResolve.call(this);
-    r.timeZone = 'Africa/Cairo';   // UTC+2 يطابق offset -120
+    r.timeZone = 'UTC';   // UTC يطابق offset 0
     return r;
 };
 } catch(e){}
 } catch(e){}
 
-// ── 10) Canvas noise خفيف — يكسر fingerprint ثابت بدون أن ي выгляд "patched" ──
-//       (تحريك pixel واحد منهجي على معالج toDataURL/getImageData)
-try {
-const _toDataURL = HTMLCanvasElement.prototype.toDataURL;
-HTMLCanvasElement.prototype.toDataURL = function(...args) {
-    try {
-        const ctx = this.getContext('2d');
-        if (ctx && this.width > 0 && this.height > 0) {
-            const img = ctx.getImageData(0, 0, this.width, this.height);
-            // noise أطباع: الأولى منها +1/-1 بشكل دوري = تبدلات pixel بصري غير مرئي
-            for (let i = 0; i < img.data.length; i += 4 * 47) {
-                img.data[i] = (img.data[i] + 1) & 0xff;
-            }
-            ctx.putImageData(img, 0, 0);
-        }
-    } catch(e){}
-    return _toDataURL.apply(this, args);
-};
+// ── 10) Canvas: لا تلاعب — canvas noise بيكون detectable من Google fingerprinting ──
+//       تم إزالة toDataURL/getImageData overrides نهائياً. الـ canvas الحقيقي أأمن.
 
-const _getImageData = CanvasRenderingContext2D.prototype.getImageData;
-CanvasRenderingContext2D.prototype.getImageData = function(...args) {
-    const img = _getImageData.apply(this, args);
-    try {
-        for (let i = 0; i < img.data.length; i += 4 * 53) {
-            img.data[i+1] = (img.data[i+1] + 1) & 0xff;
-        }
-    } catch(e){}
-    return img;
-};
-} catch(e){}
-
-// ── 11) AudioContext fingerprint noise (نفس مبدأ canvas) ──
-try {
-const _analyser = (window.AnalyserNode?.prototype?.getFloatFrequencyData);
-if (_analyser) {
-    const _origGet = _analyser;
-    window.AnalyserNode.prototype.getFloatFrequencyData = function(arr) {
-        _origGet.call(this, arr);
-        for (let i = 0; i < arr.length; i += 97) arr[i] += (Math.random()-0.5) * 1e-7;
-    };
-}
-} catch(e){}
+// ── 11) AudioContext: تم الإزالة — noise injection detectable من Google ──
 
 // ── 12) navigator.connection (body لم يتم موجوده؟ Chrome بيظهره) ──
 try {
@@ -760,7 +723,9 @@ def _build_options(ua: str, use_exclude_switches: bool = True):
               '--no-default-browser-check',
               '--disable-prompt-on-repost',
               '--renderer-process-limit=1',
-              '--disable-features=AutomationControlled,site-per-process,VizDisplayCompositor,TranslateUI,AutofillServerCommunication,IsolateOrigins,site-isolation-trial-opt-outs',
+              # مفيش site-per-process/IsolateOrigins/site-isolation-trial-opt-outs (بتكسر cross-origin redirects الـ SSO محتاجها)
+              # مفيش VizDisplayCompositor (بيسبب rendering anomalies)
+              '--disable-features=AutomationControlled,TranslateUI,AutofillServerCommunication',
               '--js-flags=--max-old-space-size=256',
               '--window-size=1920,1080',
               '--window-position=0,0',
@@ -773,7 +738,9 @@ def _build_options(ua: str, use_exclude_switches: bool = True):
               f'--user-agent={ua}']:
         try: opt.add_argument(a)
         except Exception: pass
-    opt.page_load_strategy = 'eager'
+    # 'normal' = d.get() يستنى لحد ما الـ redirect chain كامل يتم (skills.google.com → accounts.google.com → console.cloud.google.com).
+    # 'eager' بيرجع على DOMContentLoaded قبل ما الـ SSO redirect chain يخلص → بيقطع السلسلة.
+    opt.page_load_strategy = 'normal'
 
     # للـ chromedriver القديم (<140) بس: نمّر excludeSwitches + useAutomationExtension + prefs.
     # للجديد (>=140): كل ده بيرفع "unrecognized chrome option" — نشيله نهائياً.
@@ -839,11 +806,8 @@ def create_driver(chat_id: str = ""):
     sopt = _build_options(ua, use_exclude_switches=exclude_sw)
     if browser_path:
         sopt.binary_location = browser_path
-    # ⭐ INCognito mode — تماماً زي متطلبات Qwiklabs (private browser, لا تعارض مع حسابك الشخصي)
-    # NOTE: incognito بيلغي الحاجة لـ user_data_dir (كل session ثانوية، لا persistent state)
-    try: sopt.add_argument('--incognito')
-    except Exception: pass
-    # أضف user-data-dir مؤقت عشان نتجنّب "profile in use" line overlap (incognito بياخد profile واحد)
+    # ⭐ مفيش --incognito — incognito + automation إشارة bot أقوى. نعتمد على temp user-data-dir فريش لكل مهمة (نفس فايدة الـ private browsing اللي Qwiklabs بتطلبه) بدون إشارة incognito.
+    # أضف user-data-dir مؤقت عشان نتجنّب "profile in use" line overlap
     # بس لازم يكون unique لكل instance:
     try:
         tmp_profile = f"/tmp/ocx_inc_{uuid_module.uuid4().hex[:8]}"
@@ -867,7 +831,7 @@ def create_driver(chat_id: str = ""):
 
     # ── طمر الـ viewport + timezone على مستوى Emulation domain (CDP) ──
     try:
-        d.execute_cdp_cmd("Emulation.setTimezoneOverride", {"timezoneId": "Africa/Cairo"})
+        d.execute_cdp_cmd("Emulation.setTimezoneOverride", {"timezoneId": "UTC"})
     except Exception: pass
     try:
         d.execute_cdp_cmd("Emulation.setLocaleOverride", {"locale": "en-US"})
@@ -897,8 +861,8 @@ def alive(d):
 def safe_get(d, url):
     try: d.get(url); return True
     except TimeoutException:
-        try: d.execute_script("window.stop();")
-        except: pass
+        # ⭐ ما نعملش window.stop() — ده بيقتل الـ SSO redirect chain (skills.google.com → accounts.google.com → console.cloud.google.com).
+        # الصفحة ممكن لسه بتعمل redirect؛ نرجع True ونسيب الـ main loop يكمّل.
         return True
     except Exception as e:
         if any(k in str(e).lower() for k in ['crash','not reachable','session','disconnected','target closed']): return False
@@ -1018,7 +982,20 @@ def run_single_task(chat_id, url, task_id, attempt_num):
 
         state = istate
         cook_tried = False
-        time.sleep(3)
+        # ⭐ انتظار استقرار URL بعد SSO redirect chain (skills.google → accounts.google → console.cloud.google)
+        prev_url = ''
+        stable_count = 0
+        for _ in range(30):
+            cur = safe_url(driver)
+            if cur == prev_url:
+                stable_count += 1
+                if stable_count >= 3:
+                    break
+            else:
+                stable_count = 0
+            prev_url = cur
+            time.sleep(2)
+        time.sleep(2)
 
         mk = InlineKeyboardMarkup().add(InlineKeyboardButton("🛑 إلغاء فوري", callback_data="abort_mission"))
         rn = f"\n🔄 *(محاولة {attempt_num})*" if attempt_num > 1 else ""
@@ -1119,6 +1096,13 @@ def run_single_task(chat_id, url, task_id, attempt_num):
                     pi_check = safe_find(driver, By.XPATH, "//input[@type='password']")
                     if pi_check and pi_check[0].is_displayed():
                         has_pw_input = True
+
+                    # ⭐ تأكيد الحظر: انتظر 5 ثواني وأعد الفحص (ممكن يكون transient أثناء SSO redirect)
+                    time.sleep(5)
+                    confirm_text = safe_exec(driver, "return document.body ? document.body.innerText : '';") or ""
+                    confirm_lower = confirm_text.lower()
+                    if "couldn't sign you in" not in confirm_lower and "domain admin" not in confirm_lower:
+                        continue
 
                     # ✅ فقط لو ما في أي حقل دخول → صفحة حظر حقيقية (مش شاشة login عادية)
                     if not has_email_input and not has_pw_input:
