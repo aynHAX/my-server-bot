@@ -23,25 +23,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
 
-# ── تزييف User-Agent (تم إزالة undetected-chromedriver — غير متوافق مع chromedriver 150) ──
-#  تعويض: chromedriver binary patched في Dockerfile + STEALTH_JS عبر CDP.
-try:
-    from fake_useragent import UserAgent as _UAFactory
-    _UA = _UAFactory(fallback="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
-except Exception:
-    class _FallbackUA:
-        def chrome(self): return "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-    _UA = _FallbackUA()
-
-# WDGA UA: نلف .chrome سواء callable أو property = بنحصل على UA وقت ما نمسكه
-_UA_BASE = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-def _pick_chrome_ua() -> str:
-    """يعمل UA صالح سواء كانت .chrome callable (fake-useragent 1.x) أو property (نسخ أحدث)."""
-    try:
-        c = _UA.chrome
-        return c() if callable(c) else str(c)
-    except Exception:
-        return _UA_BASE
+# ── لا تزييف User-Agent — UA الحقيقي أأمن. تزييف UA = Windows على Linux = 100 mismatch (fonts, WebGL, platform).
+# fake_useragent + --user-agent كانوا بيعمل mismatch detectable. Chromium على Linux ليه UA صحيح أصلاً.
 
 # بنية تشفير بصمة المتصفح الموحدة (متزامنة JS + Python)
 import hashlib
@@ -479,187 +462,30 @@ threading.Thread(target=run_hc, daemon=True).start()
 display = Display(visible=0, size=(1920, 1080), color_depth=24)
 display.start()
 
+# ── نهج جديد: "أحسن stealth = لا stealth" ──
+# المتصفح الحقيقي عنده 0 overrides. كل override بـ Object.defineProperty بيترك trace
+# قابل للكشف (Object.getOwnPropertyDescriptor بيكشف getter مخصص).
+# الاعتماد على: --disable-blink-features=AutomationControlled (يخفي navigator.webdriver
+# على مستوى Blink، مش JS) + binary patch للـ cdc_ في Dockerfile + excludeSwitches.
+# الكود ده fallback أخير فقط — لو الـ blink flag مش شغّال على نسخة Chrome معينة.
 STEALTH_JS = r"""
 (() => {
-// ═══════════════════════════════════════════════════════════════════
-//  حزمة "خارق" — Stealth JS كامل (يتم حقنه قبل أي صفحة)
-//  هدف: مطابقة بصمة Chrome حقيقي على Windows 10 بدقة أقصى
-// ═══════════════════════════════════════════════════════════════════
-
-// ── 1) إخفاء السيلينيوم / webdriver من كل نافذة ──
-try { Object.defineProperty(navigator, 'webdriver', {get: () => undefined}); } catch(e){}
-try { delete navigator.__proto__.webdriver; } catch(e){}
-
-// ── 2) window.chrome كامل (مطابق Chrome الحقيقي) ──
-window.chrome = window.chrome || {};
-window.chrome.runtime = window.chrome.runtime || {
-    OnInstalledReason: {CHROME_UPDATE: 'chrome_update', INSTALL: 'install', SHARED_MODULE_UPDATE: 'shared_module_update', UPDATE: 'update'},
-    OnRestartReason: {APP_UPDATE: 'app_update', OS_UPDATE: 'os_update', RUNTIME_UPDATE: 'runtime_update'},
-    PlatformArch: {ARM64: 'arm64', ARMV7_32: 'armv7-32', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64'},
-    PlatformNaclArch: {ARM: 'arm', MIPS: 'mips', MIPS64: 'mips64', X86_32: 'x86-32', X86_64: 'x86-64'},
-    PlatformOs: {ANDROID: 'android', CROS: 'cros', LINUX: 'linux', MAC: 'mac', OPENBSD: 'openbsd', WIN: 'win'},
-    RequestUpdateCheckStatus: {NO_UPDATE: 'no_update', THROTTLED: 'throttled', UPDATE_AVAILABLE: 'update_available'},
-    connect: () => {},
-    sendMessage: () => {},
-    id: undefined
-};
-
-// ── 3) plugins كاملة + iterator حقيقي (مطابقة Chrome 131) ──
+// ── fallback وحيد: إخفاء navigator.webdriver لو لسه موجود (blink flag لم يخفيه) ──
 try {
-Object.defineProperty(navigator, 'plugins', {get: () => {
-    const mk = (n, fn, d) => ({name:n, filename:fn, description:d, length:1, item:(i)=>({filename:fn, suffixes:[], type:''}), namedItem:(n)=>({filename:fn, suffixes:[], type:''})});
-    const p = {length: 5,
-        0: mk('PDF Viewer', 'internal-pdf-viewer', 'Portable Document Format'),
-        1: mk('Chrome PDF Viewer', 'internal-pdf-viewer', 'Portable Document Format'),
-        2: mk('Chromium PDF Viewer', 'internal-pdf-viewer', 'Portable Document Format'),
-        3: mk('Microsoft Edge PDF Viewer', 'internal-pdf-viewer', 'Portable Document Format'),
-        4: mk('WebKit built-in PDF', 'internal-pdf-viewer', 'Portable Document Format')};
-    p[Symbol.iterator] = function*(){ for(let i=0;i<this.length;i++) yield this[i]; };
-    p.refresh = ()=>{};
-    p.item = (i)=>p[i];
-    p.namedItem = (n)=>p[0];
-    return p;
-}});
-} catch(e){}
-
-// ── 4) mimeTypes متناسق مع plugins ──
-try {
-Object.defineProperty(navigator, 'mimeTypes', {get: () => {
-    const m = {length: 2,
-        0: {type:'application/pdf', suffixes:'pdf', description:'Portable Document Format', enabledPlugin: null},
-        1: {type:'text/pdf', suffixes:'pdf', description:'Portable Document Format', enabledPlugin: null}};
-    m[Symbol.iterator] = function*(){ for(let i=0;i<this.length;i++) yield this[i]; };
-    m.item = (i)=>m[i];
-    m.namedItem = (n)=>m[0];
-    return m;
-}});
-} catch(e){}
-
-// ── 5) خصائص navigator الكاملة + التناسق ──
-try { Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']}); } catch(e){}
-try { Object.defineProperty(navigator, 'language', {get: () => 'en-US'}); } catch(e){}
-try { Object.defineProperty(navigator, 'platform', {get: () => 'Win32'}); } catch(e){}
-try { Object.defineProperty(navigator, 'productSub', {get: () => '20030107'}); } catch(e){}
-try { Object.defineProperty(navigator, 'vendor', {get: () => 'Google Inc.'}); } catch(e){}
-try { Object.defineProperty(navigator, 'product', {get: () => 'Gecko'}); } catch(e){}
-try { Object.defineProperty(navigator, 'appName', {get: () => 'Netscape'}); } catch(e){}
-try { Object.defineProperty(navigator, 'appCodeName', {get: () => 'Mozilla'}); } catch(e){}
-try { Object.defineProperty(navigator, 'appVersion', {get: () => '5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'}); } catch(e){}
-try { Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 4}); } catch(e){}
-try { Object.defineProperty(navigator, 'deviceMemory', {get: () => 8}); } catch(e){}
-try { Object.defineProperty(navigator, 'maxTouchPoints', {get: () => 0}); } catch(e){}
-try { Object.defineProperty(navigator, 'doNotTrack', {get: () => null}); } catch(e){}
-try { Object.defineProperty(navigator, 'cookieEnabled', {get: () => true}); } catch(e){}
-try { Object.defineProperty(navigator, 'onLine', {get: () => true}); } catch(e){}
-
-// ── 6) screen متناسق + window.outer/inner متناسقة ──
-try { Object.defineProperty(screen, 'availWidth',  {get: () => 1920}); } catch(e){}
-try { Object.defineProperty(screen, 'availHeight', {get: () => 1040}); } catch(e){}
-try { Object.defineProperty(screen, 'width',      {get: () => 1920}); } catch(e){}
-try { Object.defineProperty(screen, 'height',     {get: () => 1080}); } catch(e){}
-try { Object.defineProperty(screen, 'availLeft',   {get: () => 0}); } catch(e){}
-try { Object.defineProperty(screen, 'availTop',    {get: () => 40}); } catch(e){}
-try { Object.defineProperty(screen, 'colorDepth',   {get: () => 24}); } catch(e){}
-try { Object.defineProperty(screen, 'pixelDepth',  {get: () => 24}); } catch(e){}
-try { Object.defineProperty(screen, 'orientation', {get: () => ({type:'landscape-primary', angle:0})}); } catch(e){}
-
-try { Object.defineProperty(window, 'outerWidth',  {get: () => 1920}); } catch(e){}
-try { Object.defineProperty(window, 'outerHeight', {get: () => 1080}); } catch(e){}
-try { Object.defineProperty(window, 'innerWidth',  {get: () => 1920}); } catch(e){}
-try { Object.defineProperty(window, 'innerHeight', {get: () => 953}); } catch(e){}
-try { Object.defineProperty(window, 'devicePixelRatio', {get: () => 1}); } catch(e){}
-try { Object.defineProperty(window, 'screenX', {get: () => 0}); } catch(e){}
-try { Object.defineProperty(window, 'screenY', {get: () => 0}); } catch(e){}
-try { Object.defineProperty(window, 'screenLeft', {get: () => 0}); } catch(e){}
-try { Object.defineProperty(window, 'screenTop', {get: () => 0}); } catch(e){}
-
-// ── 7) permissions API متناسق مع حالة notification ـ prompt ──
-//     (جوجل بيكشف ال mismatch بين permissions.query و notification.permission)
-try {
-const _permQuery = navigator.permissions?.query?.bind(navigator.permissions);
-Object.defineProperty(navigator, 'permissions', {get: () => ({
-    query: (p) => {
-        if (p && p.name === 'notifications') return Promise.resolve({state: 'prompt', onchange: null});
-        return Promise.resolve({state: 'prompt', onchange: null});
+    if (navigator.webdriver) {
+        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
     }
-}));
 } catch(e){}
 
-// ── 8) WebGL renderer مطابق Intel HD (متناسق مع hardwareConcurrency) ──
+// ── تصفية console.warn من رسائل cdc_ (safety net للـ binary patch) ──
 try {
-const _getParameter = WebGLRenderingContext.prototype.getParameter;
-WebGLRenderingContext.prototype.getParameter = function(p) {
-    if (p === 37445) return 'Intel Inc.';                                  // UNMASKED_VENDOR
-    if (p === 37446) return 'Intel(R) HD Graphics 620 (Kaby Lake GT2)';    // UNMASKED_RENDERER
-    if (p === 7936)  return 'Intel Inc.';
-    if (p === 7937)  return 'Intel(R) HD Graphics 620';
-    return _getParameter.call(this, p);
-};
-const _getParameter2 = WebGL2RenderingContext?.prototype?.getParameter;
-if (_getParameter2) {
-    WebGL2RenderingContext.prototype.getParameter = function(p) {
-        if (p === 37445) return 'Intel Inc.';
-        if (p === 37446) return 'Intel(R) HD Graphics 620 (Kaby Lake GT2)';
-        if (p === 7936)  return 'Intel Inc.';
-        if (p === 7937)  return 'Intel(R) HD Graphics 620';
-        return _getParameter2.call(this, p);
+    const _warn = console.warn;
+    console.warn = function(...a) {
+        const s = a.join(' ');
+        if (/cdc_/i.test(s) || /chrome_driver/i.test(s)) return;
+        return _warn.apply(console, a);
     };
-}
 } catch(e){}
-
-// ── 9) Timezone متناسق: getTimezoneOffset 0 = UTC (يطابق توقيت حاوية Railway الفعلي UTC) ──
-//     إجبار UTC+2 (Africa/Cairo) كان بيعمل mismatch detectable مع توقيت السيرفر الفعلي (UTC).
-//     + Intl.DateTimeFormat و timezone string متناسقة (تطابق prefs + offset)
-try {
-Object.defineProperty(Date.prototype, 'getTimezoneOffset', {get: () => 0});
-try { Intl.DateTimeFormat().resolvedOptions().timeZone; } catch(e){}
-// تعديل resolvedOptions timeZone لتكون متناسقة مع UTC (offset 0)
-const _origResolve = Intl.DateTimeFormat.prototype.resolvedOptions;
-try {
-Intl.DateTimeFormat.prototype.resolvedOptions = function() {
-    const r = _origResolve.call(this);
-    r.timeZone = 'UTC';   // UTC يطابق offset 0
-    return r;
-};
-} catch(e){}
-} catch(e){}
-
-// ── 10) Canvas: لا تلاعب — canvas noise بيكون detectable من Google fingerprinting ──
-//       تم إزالة toDataURL/getImageData overrides نهائياً. الـ canvas الحقيقي أأمن.
-
-// ── 11) AudioContext: تم الإزالة — noise injection detectable من Google ──
-
-// ── 12) navigator.connection (body لم يتم موجوده؟ Chrome بيظهره) ──
-try {
-if (!('connection' in navigator)) {
-    Object.defineProperty(navigator, 'connection', {get: () => ({
-        effectiveType: '4g', rtt: 50, downlink: 10, saveData: false, type: 'wifi', onchange: null
-    })});
-}
-} catch(e){}
-
-// ── 13) Notification.permission متناسق ──
-try { if (window.Notification) Object.defineProperty(Notification, 'permission', {get: () => 'default'}); } catch(e){}
-
-// ── 14) إخفاء أن window.chrome.runtime.id نص و patch traces ──
-try { Object.defineProperty(navigator, 'userAgent', {get: () => navigator.userAgent.replace(/HeadlessChrome/i, 'Chrome')}); } catch(e){}
-
-// ── 15) iframe contentWindow stealth (الصفحات الفرعية كمان) ──
-try {
-const _attachShadow = Element.prototype.attachShadow;
-Element.prototype.attachShadow = function(...a) { return _attachShadow.apply(this, a); };
-} catch(e){}
-
-// ── 16) مفتاح cdc_ cialis detection (regExp على window.warn names) ──
-try {
-const _warn = console.warn;
-console.warn = function(...a) {
-    const s = a.join(' ');
-    if (/cdc_/i.test(s) || /chrome_driver/i.test(s)) return;
-    return _warn.apply(console, a);
-};
-} catch(e){}
-
 })();
 """
 
@@ -689,7 +515,7 @@ def _get_chrome_version():
         return int(m.group(1)) if m else None
     except Exception: return None
 
-def _build_options(ua: str, use_exclude_switches: bool = True):
+def _build_options(use_exclude_switches: bool = True):
     """يبني ChromeOptions جديد بالكامل في كل مرة.
 
     use_exclude_switches=False للـ chromedriver 140+ الذي لا يعترف بـ:
@@ -725,7 +551,8 @@ def _build_options(ua: str, use_exclude_switches: bool = True):
               '--renderer-process-limit=1',
               # مفيش site-per-process/IsolateOrigins/site-isolation-trial-opt-outs (بتكسر cross-origin redirects الـ SSO محتاجها)
               # مفيش VizDisplayCompositor (بيسبب rendering anomalies)
-              '--disable-features=AutomationControlled,TranslateUI,AutofillServerCommunication',
+              '--disable-features=TranslateUI,AutofillServerCommunication',
+              '--disable-blink-features=AutomationControlled',
               '--js-flags=--max-old-space-size=256',
               '--window-size=1920,1080',
               '--window-position=0,0',
@@ -734,8 +561,7 @@ def _build_options(ua: str, use_exclude_switches: bool = True):
               '--disk-cache-size=0',
               '--media-cache-size=0',
               '--aggressive-cache-discard',
-              '--disable-application-cache',
-              f'--user-agent={ua}']:
+              '--disable-application-cache']:
         try: opt.add_argument(a)
         except Exception: pass
     # 'normal' = d.get() يستنى لحد ما الـ redirect chain كامل يتم (skills.google.com → accounts.google.com → console.cloud.google.com).
@@ -768,9 +594,8 @@ def _build_options(ua: str, use_exclude_switches: bool = True):
 def create_driver(chat_id: str = ""):
     nuke_all_chrome(); time.sleep(2)
 
-    # ── User-Agent (مش عشوائي كل session = بصمة متماسكة) ──
-    ua = _pick_chrome_ua()
-    if 'HeadlessChrome' in ua: ua = ua.replace('HeadlessChrome', 'Chrome')
+    # ⭐ لا UA تزييف — Chromium على Linux ليه UA صحيح (X11; Linux x86_64).
+    # تزييف UA = Windows على Linux = 100 mismatch مكشوف (platform, WebGL, fonts, screen).
 
     # ── Qwiklabs REQUIRE incognito: profile فريش لكل مهمة + مسحه بعد المهمة ──
     # القواعد: "Run the lab in private browsing" + "Actions outside the lab scope will trigger
@@ -803,7 +628,7 @@ def create_driver(chat_id: str = ""):
     #  STEALTH_JS بتفضل شغّالة = navigator.webdriver مخفي + سلاسل cdc_ ممسوحة.
     # ════════════════════════════════════════════════════════════════
     print("🚀 [Driver] vanilla selenium + stealth + INCognito (المسار الأساسي)")
-    sopt = _build_options(ua, use_exclude_switches=exclude_sw)
+    sopt = _build_options(use_exclude_switches=exclude_sw)
     if browser_path:
         sopt.binary_location = browser_path
     # ⭐ مفيش --incognito — incognito + automation إشارة bot أقوى. نعتمد على temp user-data-dir فريش لكل مهمة (نفس فايدة الـ private browsing اللي Qwiklabs بتطلبه) بدون إشارة incognito.
@@ -829,13 +654,8 @@ def create_driver(chat_id: str = ""):
     except Exception as e:
         print(f"⚠️ [Stealth CDP] {e}")
 
-    # ── طمر الـ viewport + timezone على مستوى Emulation domain (CDP) ──
-    try:
-        d.execute_cdp_cmd("Emulation.setTimezoneOverride", {"timezoneId": "UTC"})
-    except Exception: pass
-    try:
-        d.execute_cdp_cmd("Emulation.setLocaleOverride", {"locale": "en-US"})
-    except Exception: pass
+    # ⭐ لا CDP timezone/locale override — Emulation.setTimezoneOverride يترك trace قابل للكشف.
+    # المتصفح الطبيعي ما عندهوش emulation. UTC هو التوقيت الطبيعي للحاوية → متناسق تلقائياً.
 
     d.set_page_load_timeout(150)
     d.set_script_timeout(30)
