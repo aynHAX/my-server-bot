@@ -1103,7 +1103,9 @@ def run_single_task(chat_id, url, task_id, attempt_num):
                             except Exception: pass
 
 
-                # ✅ FIX: فحص الحظر — فقط بالنص المرئي + التأكد من عدم وجود حقول دخول
+                # ✅ فحص الحظر — "Couldn't sign you in / Contact your domain admin"
+                # هذه شاشة حظر حساب من Qwiklabs (expired أو deviation).
+                # ما ينفعش retry بنفس الحساب — لازم ABORT + طلب حساب/رابط جديد.
                 if ("couldn't sign you in" in vt_lower or
                     ("domain admin" in vt_lower and "for help" in vt_lower) or
                     "admin for help" in vt_lower):
@@ -1118,11 +1120,27 @@ def run_single_task(chat_id, url, task_id, attempt_num):
                     if pi_check and pi_check[0].is_displayed():
                         has_pw_input = True
 
-                    # ✅ فقط لو ما في أي حقل دخول → صفحة خطأ حقيقية → إعادة محاولة بجلسة جديدة
+                    # ✅ فقط لو ما في أي حقل دخول → صفحة حظر حقيقية (مش شاشة login عادية)
                     if not has_email_input and not has_pw_input:
                         sdm(chat_id, status_msg_id)
-                        safe_exec(driver, "document.cookie.split(';').forEach(c=>{document.cookie=c.trim().split('=')[0]+'=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';})")
-                        return R_RETRY
+                        # امسح كل الـ storage عشان لو فيه أي trace
+                        try:
+                            safe_exec(driver, """
+                                document.cookie.split(';').forEach(c=>{
+                                    document.cookie=c.trim().split('=')[0]+'=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
+                                });
+                                try { localStorage.clear(); } catch(e){}
+                                try { sessionStorage.clear(); } catch(e){}
+                            """)
+                        except Exception: pass
+                        try:
+                            bot.send_message(chat_id,
+                                "⛔ **الحساب محظور من Qwiklabs.**\n\n"
+                                "هذا الحساب إما انتهت صلاحيته أو تم حظره بسبب مخالفة شروط Qwiklabs.\n\n"
+                                "💡 **الحل:** أرسل رابط دخول جديد بحساب `student-02-xxx@qwiklabs.net` آخر.",
+                                parse_mode="Markdown")
+                        except Exception: pass
+                        return R_ABORT   # ⭐ مش retry — الحساب محظور، مفيش فايدة
 
                 ei = safe_find(driver, By.XPATH, "//input[@type='email']")
                 pi = safe_find(driver, By.XPATH, "//input[@type='password']")
