@@ -22,8 +22,8 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
 
-# ── حزمة "خارق": undetected-chromedriver + تزييف User-Agent ──
-import undetected_chromedriver as uc
+# ── تزييف User-Agent (تم إزالة undetected-chromedriver — غير متوافق مع chromedriver 150) ──
+#  تعويض: chromedriver binary patched في Dockerfile + STEALTH_JS عبر CDP.
 try:
     from fake_useragent import UserAgent as _UAFactory
     _UA = _UAFactory(fallback="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
@@ -726,8 +726,14 @@ def _get_chrome_version():
     except Exception: return None
 
 def _build_options(ua: str, use_exclude_switches: bool = True):
-    """يبني ChromeOptions جديد بالكامل في كل مرة (مش نعيد استعمال object قديم).
-    use_exclude_switches=False للـ chromedriver 150+ الذي لا يعترف بـ excludeSwitches."""
+    """يبني ChromeOptions جديد بالكامل في كل مرة.
+
+    use_exclude_switches=False للـ chromedriver 140+ الذي لا يعترف بـ:
+      - excludeSwitches
+      - useAutomationExtension
+      - prefs (_profile_* experiments)
+    في الحالة دي بنعتمد على: chromedriver binary patched (delete cdc_) +
+    STEALTH_JS حقين عبر CDP + CLI flags فقط."""
     from selenium.webdriver.chrome.options import Options as _UCOptions
     opt = _UCOptions()
     # ⛔️ ممنوع --headless: جوجل بيكشفها بـ permissions query + null outerHeight.
@@ -753,7 +759,7 @@ def _build_options(ua: str, use_exclude_switches: bool = True):
               '--no-default-browser-check',
               '--disable-prompt-on-repost',
               '--renderer-process-limit=1',
-              '--disable-features=site-per-process,VizDisplayCompositor,TranslateUI,AutofillServerCommunication,IsolateOrigins,site-isolation-trial-opt-outs',
+              '--disable-features=AutomationControlled,site-per-process,VizDisplayCompositor,TranslateUI,AutofillServerCommunication,IsolateOrigins,site-isolation-trial-opt-outs',
               '--js-flags=--max-old-space-size=256',
               '--window-size=1920,1080',
               '--window-position=0,0',
@@ -767,24 +773,27 @@ def _build_options(ua: str, use_exclude_switches: bool = True):
         try: opt.add_argument(a)
         except Exception: pass
     opt.page_load_strategy = 'eager'
-    # excludeSwitches متوافق لحد chromedriver ~130. 150+ لا يعترف به → نحطه flag مستقل.
+
+    # للـ chromedriver القديم (<140) بس: نمّر excludeSwitches + useAutomationExtension + prefs.
+    # للجديد (>=140): كل ده بيرفع "unrecognized chrome option" — نشيله نهائياً.
     if use_exclude_switches:
         try:
             opt.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
         except Exception: pass
-    try:
-        opt.add_experimental_option('useAutomationExtension', False)
-    except Exception: pass
-    try:
-        opt.add_experimental_option("prefs", {
-            "profile.default_content_setting_values.notifications": 2,
-            "credentials_enable_service": False,
-            "profile.password_manager_enabled": False,
-            "safebrowsing.enabled": False,
-            "profile.default_content_setting_values.geolocation": 2,
-            "profile.default_content_setting_values.media_stream": 2,
-        })
-    except Exception: pass
+        try:
+            opt.add_experimental_option('useAutomationExtension', False)
+        except Exception: pass
+        try:
+            opt.add_experimental_option("prefs", {
+                "profile.default_content_setting_values.notifications": 2,
+                "credentials_enable_service": False,
+                "profile.password_manager_enabled": False,
+                "safebrowsing.enabled": False,
+                "profile.default_content_setting_values.geolocation": 2,
+                "profile.default_content_setting_values.media_stream": 2,
+            })
+        except Exception: pass
+    # للجديد: نعتمد على STEALTH_JS + CDP + chromedriver binary patched في الـ Dockerfile.
     return opt
 
 
@@ -810,85 +819,28 @@ def create_driver(chat_id: str = ""):
     print(f"🔍 [UC] browser={browser_path} driver={driver_path} version={ver}")
 
     # كشف نسخة chromedriver عشان نعرف هل نمرّر excludeSwitches ولا لا
-    # chromedriver >= 140 بيرفض excludeSwitches
+    # chromedriver >= 140 بيرفض excludeSwitches + useAutomationExtension + prefs القديمة
     exclude_sw = True
     if ver and ver >= 140:
         exclude_sw = False
-        print("ℹ️ [UC] Chrome >=140 → تخطّي excludeSwitches (غير معترف به)")
+        print("ℹ️ [UC] Chrome >=140 → تخطّي excludeSwitches + useAutomationExtension + prefs")
 
     # ════════════════════════════════════════════════════════════════
-    #  طبقة 1: undetected-chromedriver مع user_data_dir ثابت
+    #  المسار الأساسي (الأكثر استقراراً مع chromedriver 150):
+    #  vanilla selenium + chromedriver binary patched (cdc_ → xxx_) في Dockerfile
+    #  + STEALTH_JS عبر CDP + user_data_dir ثابت + --disable-blink-features=AutomationControlled
+    #  ده بيماثل ما بيعمله undetected-chromedriver بأقل كثير من المتاعب.
     # ════════════════════════════════════════════════════════════════
-    try:
-        opt = _build_options(ua, use_exclude_switches=exclude_sw)
-        uc_kwargs = dict(
-            options=opt,
-            user_data_dir=udd,
-            use_subprocess=True,
-            service_log_path=os.devnull,
-            no_sandbox=True,
-            suppress_welcome=True,
-        )
-        if browser_path: uc_kwargs["browser_executable_path"] = browser_path
-        if driver_path:  uc_kwargs["driver_executable_path"]  = driver_path
-        if ver:          uc_kwargs["version_main"]             = ver
-        d = uc.Chrome(**uc_kwargs)
-        print("✅ [UC] undetected-chromedriver نشط مع profile ثابت")
-    except Exception as e1:
-        # ════════════════════════════════════════════════════════════════
-        #  طبقة 2: uc بدون profile ثابت (ملف مغلوك)
-        # ════════════════════════════════════════════════════════════════
-        print(f"⚠️ [UC] layer1 fail ({str(e1)[:120]}); layer2: no profile")
-        nuke_all_chrome(); time.sleep(2)
-        try:
-            opt2 = _build_options(ua, use_exclude_switches=exclude_sw)
-            uc_kwargs2 = dict(
-                options=opt2,
-                use_subprocess=True,
-                service_log_path=os.devnull,
-                no_sandbox=True,
-                suppress_welcome=True,
-            )
-            if browser_path: uc_kwargs2["browser_executable_path"] = browser_path
-            if driver_path:  uc_kwargs2["driver_executable_path"]  = driver_path
-            if ver:          uc_kwargs2["version_main"]             = ver
-            d = uc.Chrome(**uc_kwargs2)
-            print("✅ [UC] undetected-chromedriver نشط (بدون profile ثابت)")
-        except Exception as e2:
-            # ════════════════════════════════════════════════════════════════
-            #  طبقة 3: uc بدون excludeSwitches نهائياً (لو الجو حوله)
-            # ════════════════════════════════════════════════════════════════
-            print(f"⚠️ [UC] layer2 fail ({str(e2)[:120]}); layer3: no excludeSwitches")
-            nuke_all_chrome(); time.sleep(2)
-            try:
-                opt3 = _build_options(ua, use_exclude_switches=False)
-                uc_kwargs3 = dict(
-                    options=opt3,
-                    use_subprocess=True,
-                    service_log_path=os.devnull,
-                    no_sandbox=True,
-                    suppress_welcome=True,
-                )
-                if browser_path: uc_kwargs3["browser_executable_path"] = browser_path
-                if driver_path:  uc_kwargs3["driver_executable_path"]  = driver_path
-                if ver:          uc_kwargs3["version_main"]             = ver
-                d = uc.Chrome(**uc_kwargs3)
-                print("✅ [UC] undetected-chromedriver نشط (بدون excludeSwitches)")
-            except Exception as e3:
-                # ════════════════════════════════════════════════════════════════
-                #  طبقة 4 (آخر أمل): vanilla selenium مع stealth JS كامل
-                # ════════════════════════════════════════════════════════════════
-                print(f"⚠️ [UC] layer3 fail ({str(e3)[:120]}); layer4 (FINAL): vanilla selenium + stealth JS")
-                nuke_all_chrome(); time.sleep(2)
-                sopt = _build_options(ua, use_exclude_switches=exclude_sw)
-                if browser_path:
-                    sopt.binary_location = browser_path
-                # أضف user-data-dir للحفاظ على تحايل الـ incognito
-                try: sopt.add_argument(f'--user-data-dir={udd}')
-                except Exception: pass
-                svc = Service(executable_path=driver_path, log_output=os.devnull) if driver_path else Service(log_output=os.devnull)
-                d = webdriver.Chrome(options=sopt, service=svc)
-                print("⚠️ [UC] تشغيل على vanilla selenium (anti-detection أضعف لكن STEALTH_JS شغّال)")
+    print("🚀 [Driver] vanilla selenium + stealth (المسار الأساسي)")
+    sopt = _build_options(ua, use_exclude_switches=exclude_sw)
+    if browser_path:
+        sopt.binary_location = browser_path
+    # أضف user-data-dir ثابت = anti-incognito + بصمة متراكمة
+    try: sopt.add_argument(f'--user-data-dir={udd}')
+    except Exception: pass
+    svc = Service(executable_path=driver_path, log_output=os.devnull) if driver_path else Service(log_output=os.devnull)
+    d = webdriver.Chrome(options=sopt, service=svc)
+    print("✅ [Driver] selenium + chromedriver patched نشط")
 
     # ── حقن stealth JS للوثائق الجديدة (على مستوى CDP — يشتغل قبل أي DOM) ──
     try:

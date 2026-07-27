@@ -1,6 +1,5 @@
 pyTelegramBotAPI==4.15.4
 selenium>=4.9.0,<5
-undetected-chromedriver>=3.5.0,<4
 PyVirtualDisplay==3.0
 pymongo==4.6.1
 fake-useragent>=1.4,<2
