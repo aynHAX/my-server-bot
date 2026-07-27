@@ -607,7 +607,7 @@ def _build_options(use_exclude_switches: bool = True):
 
 def create_driver(chat_id: str = ""):
     # ⭐ لا nuke_all_chrome — يقتل مهام مستخدمين آخرين. تنظيف profile المؤقت فقط.
-    time.sleep(1)
+    time.sleep(0.5)
 
     # ⭐ لا UA تزييف — Chromium على Linux ليه UA صحيح (X11; Linux x86_64).
     # تزييف UA = Windows على Linux = 100 mismatch مكشوف (platform, WebGL, fonts, screen).
@@ -672,9 +672,9 @@ def create_driver(chat_id: str = ""):
     # ⭐ لا CDP timezone/locale override — Emulation.setTimezoneOverride يترك trace قابل للكشف.
     # المتصفح الطبيعي ما عندهوش emulation. UTC هو التوقيت الطبيعي للحاوية → متناسق تلقائياً.
 
-    d.set_page_load_timeout(150)
-    d.set_script_timeout(30)
-    d.implicitly_wait(3)
+    d.set_page_load_timeout(60)
+    d.set_script_timeout(15)
+    d.implicitly_wait(1)
     return d
 
 def get_driver_safe(chat_id: str = ""):
@@ -685,7 +685,7 @@ def get_driver_safe(chat_id: str = ""):
             print(f"✅ [UC-Chrome] OK chat={chat_id}"); return d
         except Exception as e:
             print(f"❌ [UC-Chrome] {i} failed chat={chat_id}: {e}")
-            kill_driver_pid(d if 'd' in dir() else None); time.sleep(5)
+            kill_driver_pid(d if 'd' in dir() else None); time.sleep(2)
     raise Exception("DRIVER_FAILED")
 
 def alive(d):
@@ -752,12 +752,12 @@ def sdm(cid, mid):
 def inject_cookies_safely(d, cookies):
     if not cookies: return
     try:
-        safe_get(d, "https://google.com/robots.txt"); time.sleep(1)
+        safe_get(d, "https://google.com/robots.txt"); time.sleep(0.5)
         for c in cookies:
             if 'google.com' in c.get('domain', ''):
                 try: d.add_cookie(c)
                 except: pass
-        safe_get(d, "https://console.cloud.google.com/robots.txt"); time.sleep(1)
+        safe_get(d, "https://console.cloud.google.com/robots.txt"); time.sleep(0.5)
         for c in cookies:
             if 'cloud.google.com' in c.get('domain', ''):
                 try: d.add_cookie(c)
@@ -817,10 +817,10 @@ def run_single_task(chat_id, url, task_id, attempt_num):
 
         state = istate
         cook_tried = False
-        # ⭐ انتظار استقرار URL بعد SSO redirect chain (skills.google → accounts.google → console.cloud.google)
+        # ⭐ انتظار استقرار URL بعد SSO redirect chain
         prev_url = ''
         stable_count = 0
-        for _ in range(30):
+        for _ in range(10):  # max 15 ثانية بدل 60
             cur = safe_url(driver)
             if cur == prev_url:
                 stable_count += 1
@@ -829,8 +829,8 @@ def run_single_task(chat_id, url, task_id, attempt_num):
             else:
                 stable_count = 0
             prev_url = cur
-            time.sleep(2)
-        time.sleep(2)
+            time.sleep(1)
+        time.sleep(1)
 
         mk = InlineKeyboardMarkup().add(InlineKeyboardButton("🛑 إلغاء فوري", callback_data="abort_mission"))
         rn = f"\n🔄 *(محاولة {attempt_num})*" if attempt_num > 1 else ""
@@ -846,9 +846,9 @@ def run_single_task(chat_id, url, task_id, attempt_num):
         pid = spid or ""
         dead = 0
 
-        while lc < 300:
+        while lc < 500:
             lc += 1
-            time.sleep(3)
+            time.sleep(1)
 
             if not is_task_current(chat_id, task_id):
                 sdm(chat_id, status_msg_id)
@@ -859,7 +859,7 @@ def run_single_task(chat_id, url, task_id, attempt_num):
                 if dead >= 3:
                     sdm(chat_id, status_msg_id)
                     return R_RETRY
-                time.sleep(2); continue
+                time.sleep(1); continue
             dead = 0
 
             if lc % 20 == 0:
@@ -932,8 +932,8 @@ def run_single_task(chat_id, url, task_id, attempt_num):
                     if pi_check and pi_check[0].is_displayed():
                         has_pw_input = True
 
-                    # ⭐ تأكيد الحظر: انتظر 5 ثواني وأعد الفحص (ممكن يكون transient أثناء SSO redirect)
-                    time.sleep(5)
+                    # ⭐ تأكيد الحظر: انتظر 3 ثواني وأعد الفحص (ممكن يكون transient أثناء SSO redirect)
+                    time.sleep(3)
                     confirm_text = safe_exec(driver, "return document.body ? document.body.innerText : '';") or ""
                     confirm_lower = confirm_text.lower()
                     if "couldn't sign you in" not in confirm_lower and "domain admin" not in confirm_lower:
@@ -969,12 +969,12 @@ def run_single_task(chat_id, url, task_id, attempt_num):
                         uls(chat_id, status_msg_id, "🔄 **SSO...**", driver=driver, is_photo=is_photo)
                         sso_tried = True
                         if not safe_get(driver, url): sdm(chat_id, status_msg_id); return R_RETRY
-                        state = "INIT"; time.sleep(2); continue
+                        state = "INIT"; time.sleep(1); continue
                     elif not cook_tried and scook:
                         uls(chat_id, status_msg_id, "⚡ **حقن كوكيز...**", driver=driver, is_photo=is_photo)
                         inject_cookies_safely(driver, scook); cook_tried = True
                         if not safe_get(driver, turl): sdm(chat_id, status_msg_id); return R_RETRY
-                        state = istate; time.sleep(2); continue
+                        state = istate; time.sleep(1); continue
                     elif cs.get('status') != 'waiting_credentials' and not cs.get('email'):
                         sdm(chat_id, status_msg_id)
                         msg = bot.send_message(chat_id, "⚠️ **مطلوب بيانات الدخول.**\n\n`student-02-xxx@qwiklabs.net Password123`", parse_mode="Markdown")
@@ -985,22 +985,22 @@ def run_single_task(chat_id, url, task_id, attempt_num):
                     try:
                         if ei and ei[0].is_displayed():
                             uls(chat_id, status_msg_id, "مصادقة", f"بريد: {cs['email']}", driver=driver, is_photo=is_photo)
-                            ei[0].click(); time.sleep(0.3)
+                            ei[0].click(); time.sleep(0.2)
                             ei[0].clear(); time.sleep(0.1)
                             for ch in cs['email']:
                                 ei[0].send_keys(ch)
-                                time.sleep(random.uniform(0.03, 0.09))
-                            time.sleep(0.5); ei[0].send_keys(Keys.ENTER)
-                            time.sleep(2); continue
+                                time.sleep(random.uniform(0.015, 0.04))
+                            time.sleep(0.3); ei[0].send_keys(Keys.ENTER)
+                            time.sleep(1); continue
                         elif pi and pi[0].is_displayed():
                             uls(chat_id, status_msg_id, "مصادقة", "كلمة مرور... ***", driver=driver, is_photo=is_photo)
-                            pi[0].click(); time.sleep(0.3)
+                            pi[0].click(); time.sleep(0.2)
                             pi[0].clear(); time.sleep(0.1)
                             for ch in cs['password']:
                                 pi[0].send_keys(ch)
-                                time.sleep(random.uniform(0.03, 0.09))
-                            time.sleep(0.5); pi[0].send_keys(Keys.ENTER)
-                            time.sleep(3); update_session(chat_id, {'email': None, 'password': None}); state = "INIT"
+                                time.sleep(random.uniform(0.015, 0.04))
+                            time.sleep(0.3); pi[0].send_keys(Keys.ENTER)
+                            time.sleep(1.5); update_session(chat_id, {'email': None, 'password': None}); state = "INIT"
                             sdm(chat_id, status_msg_id)
                             mk = InlineKeyboardMarkup().add(InlineKeyboardButton("🛑 إلغاء", callback_data="abort_mission"))
                             ss = safe_screenshot(driver)
@@ -1037,7 +1037,7 @@ def run_single_task(chat_id, url, task_id, attempt_num):
                     if btn.is_displayed():
                         for cb in safe_find(driver, By.XPATH, "//*[@role='checkbox'] | //mat-checkbox | //input[@type='checkbox']"):
                             safe_exec(driver, "arguments[0].click();", cb)
-                        time.sleep(1); safe_exec(driver, "arguments[0].click();", btn); break
+                        time.sleep(0.5); safe_exec(driver, "arguments[0].click();", btn); break
             except: pass
 
             if state == "INIT":
@@ -1056,7 +1056,7 @@ def run_single_task(chat_id, url, task_id, attempt_num):
                         fc = safe_cookies(driver)
                         if fc: update_server_cookies(url, fc)
                         uls(chat_id, status_msg_id, "🟢 🔐 تم الوصول.", driver=driver, is_photo=is_photo)
-                        time.sleep(1)
+                        time.sleep(0.5)
                         if cs.get('replace_mode'):
                             if not safe_get(driver, f"https://shell.cloud.google.com/?enableapi=true&project={pid}&pli=1&show=terminal"): sdm(chat_id, status_msg_id); return R_RETRY
                             state = "AUTHORIZE_SHELL"
@@ -1076,14 +1076,14 @@ def run_single_task(chat_id, url, task_id, attempt_num):
                     try:
                         if re_el.is_displayed():
                             safe_exec(driver, "arguments[0].scrollIntoView({block:'center'});", re_el)
-                            time.sleep(1); safe_exec(driver, "arguments[0].click();", re_el)
+                            time.sleep(0.5); safe_exec(driver, "arguments[0].click();", re_el)
                             state = "EXTRACT_REGIONS"; break
                     except: pass
                 else: safe_exec(driver, "window.scrollBy(0,300);")
 
             elif state == "EXTRACT_REGIONS":
                 if cs.get('replace_mode'): state = "WAIT_USER_SELECTION"; continue
-                time.sleep(1)
+                time.sleep(0.5)
                 rlist = []
                 for opt in safe_find(driver, By.XPATH, "//*[@role='option'] | //mat-option | //*[contains(@class,'mat-option-text')]"):
                     try:
@@ -1131,7 +1131,7 @@ def run_single_task(chat_id, url, task_id, attempt_num):
 
             elif state == "WAIT_TERMINAL_BOOT":
                 jt = "function c(r){if(r.querySelector('textarea.xterm-helper-textarea'))return true;for(let f of r.querySelectorAll('iframe')){try{if(c(f.contentDocument))return true}catch(e){}}return false}return c(document);"
-                if safe_exec(driver, jt): time.sleep(1); state = "INJECT_PAYLOAD"
+                if safe_exec(driver, jt): time.sleep(0.5); state = "INJECT_PAYLOAD"
 
             elif state == "INJECT_PAYLOAD":
                 uls(chat_id, status_msg_id, "حقن النواة", "جاري حقن OCX...", driver=driver, is_photo=is_photo)
@@ -1208,7 +1208,7 @@ def worker_loop(worker_id: int):
                         rm = bot.send_message(cid, f"🔄 **إعادة محاولة ({att}/3)...**", parse_mode="Markdown")
                         time.sleep(2); sdm(cid, rm.message_id)
                     except: pass
-                    time.sleep(5)
+                    time.sleep(2)
                     if not is_task_current(cid, tid): break
                     update_session(cid, {'status': 'processing', 'interaction_time': time.time()})
 
