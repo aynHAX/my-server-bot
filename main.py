@@ -46,7 +46,9 @@ def _pick_chrome_ua() -> str:
 import hashlib
 def _fp_seed(chat_id: str = "") -> int:
     """بذرة ثابتة لكل مستخدم = بصمة متماسكة عبر جلساته (مش عشوائية كل مرة)."""
-    base = (chat_id or str(os.environ.get("ADMIN_ID", "ocx"))).encode()
+    # تصحيح: chat_id من Telebot بيكون int، لازم str() الأول عشان .encode()
+    cid = chat_id if chat_id else os.environ.get("ADMIN_ID", "ocx")
+    base = str(cid).encode()
     return int(hashlib.md5(base).hexdigest(), 16)
 
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '')
@@ -1555,24 +1557,39 @@ if __name__ == "__main__":
     try: bot.remove_webhook()
     except: pass
 
-    # اطرد أي polling قديم من نسخة سابقة قبل ما نبدأ (يقلل الـ 409 من نسختين شغلتين)
-    try:
-        bot.get_updates(offset=-1, timeout=1)
-    except Exception as _e:
-        print(f"⚠️ [Poll] flush pre-start: {_e}")
+    # ── الحل النهائي للـ 409: اسحب updates بـ offset=-1 مرات متتالية
+    # ده بيعمل "commit" لآخر update_id ويعطّل أي long-polling معلّق من نسخة تانية ──
+    # لازم نكرّرها عشان Telegram ممكن يكون عنده pending long-polls كهلسة قديمة
+    print("🔄 [Poll] Flushing stale polling sessions...")
+    for attempt in range(5):
+        try:
+            bot.get_updates(offset=-1, timeout=1, long_polling_timeout=1)
+            # لو وصل لهنا = نجح، مفيش conflict دلوقتي
+            print(f"✅ [Poll] flush OK on attempt {attempt+1}")
+            break
+        except Exception as _e:
+            if '409' in str(_e) or 'Conflict' in str(_e):
+                print(f"⚠️ [Poll] flush {attempt+1}/5 blocked by 409 — retry...")
+                time.sleep(2)
+            else:
+                print(f"⚠️ [Poll] flush {attempt+1}/5 OTHER: {_e}")
+                break
 
     poll_backoff = 3
     while True:
         try:
             ensure_worker()
-            # drop_pending_updates=True بيمسك آخر update_id ويشطب اللي محتسبة فوقه
-            # = يكسر حلقة الـ 409 conflict لما في polling معلّق
-            bot.polling(none_stop=True, timeout=60, skip_pending=True, long_polling_timeout=20)
+            # skip_pending=True + long_polling_timeout=20 = أقل احتمال للـ 409
+            bot.polling(none_stop=True, timeout=20, skip_pending=True, long_polling_timeout=20)
             poll_backoff = 3
         except Exception as e:
             print(f"❌ [Poll] {e}")
-            # 409 = نسخة تانية شغّالة — نزوّد الباكوف إكسبونينشيال (حتى 30s)
             if '409' in str(e) or 'Conflict' in str(e):
-                print(f"⚠️ [Poll] نسخة تانية بتـ polling بنفس الـ token — لازم تقتلها. باكوف {poll_backoff}s")
-                poll_backoff = min(poll_backoff * 2, 30)
+                print(f"⚠️ [Poll] CRITICAL: نسخة تانية بتـ polling بنفس الـ token BOT_TOKEN!")
+                print(f"⚠️ [Poll] ═══════════════════════════════════════════")
+                print(f"⚠️ [Poll] المشكلة مش في الكود — في بوت تاني بيعمل polling خارجنا.")
+                print(f"⚠️ [Poll] الحل: اذهب لـ @BotFather احذف الـ webhook، او غيّر BOT_TOKEN.")
+                print(f"⚠️ [Poll] الباكوف الحالي: {poll_backoff}s — هيرجع صح بعد ما النسخة التانية توقف.")
+                print(f"⚠️ [Poll] ═══════════════════════════════════════════")
+                poll_backoff = min(poll_backoff * 2, 60)
             time.sleep(poll_backoff)
